@@ -50,6 +50,12 @@ pub struct Sync<'info> {
 }
 
 impl Sync<'_> {
+    /// Permissionless: recomputes the ext index from the latest `$M` multiplier (net of the
+    /// yield fee) and pushes the resulting multiplier to the ext mint's ScaledUiAmount config.
+    /// `wrap`/`unwrap` run the same sync internally, so calling this explicitly is only needed
+    /// to refresh the multiplier between wraps. Contrast with the crank `sync`, which is
+    /// earn-authority-gated and only snapshots indices for `claim_for`.
+
     pub fn handler(ctx: Context<Self>) -> Result<()> {
         // Sync the multiplier
         // This will update the multiplier on ext_mint

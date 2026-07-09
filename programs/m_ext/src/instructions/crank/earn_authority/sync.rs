@@ -44,9 +44,15 @@ pub struct Sync<'info> {
 }
 
 impl Sync<'_> {
-    /// This instruction allows the earn authority to sync the index and timestamp with the latest values.
+    /// Allows the earn authority to sync the index and timestamp with the latest values.
     /// It recalculates the index based on the current multiplier and updates the global account.
     /// The multiplier is scaled to a u64 index for storage.
+    ///
+    /// Crank variant: this only snapshots the indices into `YieldConfig` to open a new claim
+    /// cycle for `claim_for` — the ext mint itself is untouched (ext tokens stay 1:1 with `$M`).
+    /// Contrast with the scaled-ui `sync`, which is permissionless and pushes a new multiplier
+    /// to the ext mint. The ext index only advances while the vault is an approved earner
+    /// (token account thawed).
 
     pub fn handler(ctx: Context<Self>) -> Result<()> {
         // Convert the latest M multiplier to a u64 index

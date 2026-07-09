@@ -95,7 +95,16 @@ pub struct ClaimFor<'info> {
 }
 
 impl ClaimFor<'_> {
-    /// This instruction allows the earn_authority to claim rewards for an earner.
+    /// Allows the earn_authority to claim rewards for an earner.
+    ///
+    /// `snapshot_balance` is the earner's token balance observed offchain at the moment of the
+    /// last `sync` — the program cannot know per-account balances at index-update time, so the
+    /// earn authority supplies it. Rewards are
+    /// `snapshot_balance * (last_ext_index / earner.last_claim_index) - snapshot_balance`,
+    /// minus the earn manager fee (if the manager is active), minted to the earner's recipient
+    /// (or user) token account. Claiming advances `earner.last_claim_index` to the global index,
+    /// so each earner can claim at most once per sync cycle, and is rejected if minting would
+    /// exceed the vault's `$M` value (collateralization check).
 
     pub fn handler(ctx: Context<Self>, snapshot_balance: u64) -> Result<()> {
         // Validate that the earner account has not already claimed this cycle

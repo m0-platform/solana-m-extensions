@@ -89,12 +89,12 @@ const mints: { [key: string]: string } = {
 
 const M_MINT = new PublicKey("mzerojk9tg56ebsrEAhfkyc9VgKjTW2zDqp6C5mhjzH");
 const EXT_SWAP: PublicKey = new PublicKey(
-  "MSwapi3WhNKMUGm9YrxGhypgUEt7wYQH3ZgG32XoWzH",
+  "MSwapi3WhNKMUGm9YrxGhypgUEt7wYQH3ZgG32XoWzH"
 );
 
 function keysFromEnv(keys: string[]) {
   return keys.map((key) =>
-    Keypair.fromSecretKey(Buffer.from(JSON.parse(process.env[key] ?? "[]"))),
+    Keypair.fromSecretKey(Buffer.from(JSON.parse(process.env[key] ?? "[]")))
   );
 }
 
@@ -109,32 +109,37 @@ async function main() {
   const program = new Command();
   const connection = new Connection(process.env.RPC_URL ?? "");
 
-  program.command("print-extensions").action(async () => {
-    const { execSync } = require("child_process");
+  program
+    .command("print-extensions")
+    .description(
+      "Print the program addresses of the extension keypairs stored in 1Password"
+    )
+    .action(async () => {
+      const { execSync } = require("child_process");
 
-    const opKeys: { [name: string]: string } = {
-      USDK: "op://Solana Dev/Solana Program Keys/program-keypair-1",
-      USDKY: "op://Solana Dev/Solana Program Keys/program-keypair-2",
-      "USD+": "op://Solana Dev/Solana Program Keys/program-keypair-3",
-      XO: "op://Solana Dev/Solana Program Keys/solana-earner-delta-keypair",
-    };
-
-    const tableData = Object.entries(opKeys).map(([name, path]) => {
-      const raw = execSync(`op read "${path}"`, { encoding: "utf-8" }).trim();
-      const keypair = Keypair.fromSecretKey(Buffer.from(JSON.parse(raw)));
-      return {
-        Name: name,
-        Address: keypair.publicKey.toBase58(),
+      const opKeys: { [name: string]: string } = {
+        USDK: "op://Solana Dev/Solana Program Keys/program-keypair-1",
+        USDKY: "op://Solana Dev/Solana Program Keys/program-keypair-2",
+        "USD+": "op://Solana Dev/Solana Program Keys/program-keypair-3",
+        XO: "op://Solana Dev/Solana Program Keys/solana-earner-delta-keypair",
       };
-    });
 
-    console.table(tableData);
-  });
+      const tableData = Object.entries(opKeys).map(([name, path]) => {
+        const raw = execSync(`op read "${path}"`, { encoding: "utf-8" }).trim();
+        const keypair = Keypair.fromSecretKey(Buffer.from(JSON.parse(raw)));
+        return {
+          Name: name,
+          Address: keypair.publicKey.toBase58(),
+        };
+      });
+
+      console.table(tableData);
+    });
 
   program
     .command("create-ext-mint")
     .description(
-      "Create a new mint for an M extension using the Token2022 program",
+      "Create a new mint for an M extension using the Token2022 program"
     )
     .option("-n, --name <string>", "Token Name", process.env.EXT_NAME)
     .option("-s, --symbol <string>", "Token Symbol", process.env.EXT_SYMBOL)
@@ -143,14 +148,14 @@ async function main() {
     .option(
       "--confidential-transfers-authority <pubkey>",
       "Enable confidential transfers",
-      "",
+      ""
     )
     .option("--transfer-hook-authority <pubkey>", "Enable transfer hook", "")
     .option("--pause-authority <pubkey>", "Enable pauser extension", "")
     .option(
       "--permanent-delegate-authority <pubkey>",
       "permanent delegate extension",
-      "",
+      ""
     )
     .option("--legacy-program", "Do not use Token2022 program", false)
     .option("-f --freeze-authority <pubkey>", "Token freeze authority", "")
@@ -178,7 +183,7 @@ async function main() {
         ]);
 
         console.log(
-          `Deploying ${mint.publicKey.toBase58()} for extension program ${ext.publicKey.toBase58()}`,
+          `Deploying ${mint.publicKey.toBase58()} for extension program ${ext.publicKey.toBase58()}`
         );
 
         const authority = process.env.SQUADS_MULTISIG
@@ -188,7 +193,7 @@ async function main() {
         // Get the mint authority by deriving the PDA from the extension program
         let mintAuthority = PublicKey.findProgramAddressSync(
           [Buffer.from("mint_authority")],
-          ext.publicKey,
+          ext.publicKey
         )[0];
 
         if (legacyProgram) {
@@ -216,8 +221,8 @@ async function main() {
               AuthorityType.MintTokens,
               mintAuthority,
               undefined,
-              TOKEN_PROGRAM_ID,
-            ),
+              TOKEN_PROGRAM_ID
+            )
           );
 
           const freezeAuth = freezeAuthority ?? process.env.SQUADS_MULTISIG;
@@ -230,8 +235,8 @@ async function main() {
                 AuthorityType.FreezeAccount,
                 new PublicKey(freezeAuth),
                 undefined,
-                TOKEN_PROGRAM_ID,
-              ),
+                TOKEN_PROGRAM_ID
+              )
             );
           }
 
@@ -293,17 +298,17 @@ async function main() {
           name,
           symbol,
           uri,
-          extensions,
+          extensions
         );
 
         console.log(`Created token mint at ${mint.publicKey.toBase58()}`);
-      },
+      }
     );
 
   program
     .command("create-vault-m-ata")
     .description(
-      "Creates an associated token account for the M mint for the extension program's vault PDA.",
+      "Creates an associated token account for the M mint for the extension program's vault PDA."
     )
     .action(async ({}) => {
       const [owner, extProgram] = keysFromEnv([
@@ -314,7 +319,7 @@ async function main() {
       // Create the vault ATA for the ext program if it doesn't exist
       const vault = PublicKey.findProgramAddressSync(
         [Buffer.from("m_vault")],
-        extProgram.publicKey,
+        extProgram.publicKey
       )[0];
       console.log("Vault PDA:", vault.toBase58());
       const vaultAta = await getOrCreateAssociatedTokenAccount(
@@ -325,7 +330,7 @@ async function main() {
         true,
         "confirmed",
         undefined,
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       );
       console.log("Vault ATA:", vaultAta.address.toBase58());
     });
@@ -333,7 +338,7 @@ async function main() {
   program
     .command("create-ata")
     .description(
-      "Creates an associated token account for the provided account on the provided mint",
+      "Creates an associated token account for the provided account on the provided mint"
     )
     .option("-m, --mint <pubkey>", "Mint public key")
     .option("-a, --account <pubkey>", "Account public key")
@@ -348,7 +353,7 @@ async function main() {
         true,
         "confirmed",
         undefined,
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       );
       console.log("ATA:", ata.address.toBase58());
     });
@@ -361,7 +366,7 @@ async function main() {
     .option(
       '-t, --token-program <"spl"|"token2022">',
       "Token program",
-      "token2022",
+      "token2022"
     )
     .action(async ({ variant, fee, tokenProgram }) => {
       const [payer, extMint, program] = keysFromEnv([
@@ -377,11 +382,11 @@ async function main() {
       // Setup wrap authorities list
       const swapGlobalSigner = PublicKey.findProgramAddressSync(
         [Buffer.from("global")],
-        EXT_SWAP,
+        EXT_SWAP
       )[0];
       const portalTokenAuth = PublicKey.findProgramAddressSync(
         [Buffer.from("token_authority")],
-        new PublicKey("mzp1q2j5Hr1QuLC3KFBCAUz5aUckT6qyuZKZ3WJnMmY"),
+        new PublicKey("mzp1q2j5Hr1QuLC3KFBCAUz5aUckT6qyuZKZ3WJnMmY")
       )[0];
 
       const wrapAuthorities: PublicKey[] = [
@@ -398,7 +403,7 @@ async function main() {
 
           const noYieldProgram = new Program(
             NO_YIELD_EXT_IDL,
-            anchorProvider(connection, payer),
+            anchorProvider(connection, payer)
           );
 
           transaction = await noYieldProgram.methods
@@ -423,7 +428,7 @@ async function main() {
 
           const suiProgram = new Program(
             SCALED_UI_EXT_IDL,
-            anchorProvider(connection, payer),
+            anchorProvider(connection, payer)
           );
 
           transaction = await suiProgram.methods
@@ -456,6 +461,9 @@ async function main() {
 
   program
     .command("migrate-ext")
+    .description(
+      "Migrate an extension from the V1 layout to V2 (runs migrate_m)"
+    )
     .option("-e, --extension <name>", "Extension program ID", "M0_WM")
     .action(async ({ extension }) => {
       const [payer, ext] = keysFromEnv(["PAYER_KEYPAIR", extension]);
@@ -464,7 +472,7 @@ async function main() {
 
       const program = new Program<MigrateExt>(
         MIGRATE_EXT_IDL,
-        anchorProvider(connection, payer),
+        anchorProvider(connection, payer)
       );
 
       const admin = process.env.SQUADS_MULTISIG
@@ -473,7 +481,7 @@ async function main() {
 
       const vault = PublicKey.findProgramAddressSync(
         [Buffer.from("m_vault")],
-        ext.publicKey,
+        ext.publicKey
       )[0];
 
       const tx = await program.methods
@@ -499,7 +507,7 @@ async function main() {
 
       const extSwap = new Program<ExtSwap>(
         EXT_SWAP_IDL,
-        anchorProvider(connection, payer),
+        anchorProvider(connection, payer)
       );
 
       const tx = await extSwap.methods
@@ -521,7 +529,7 @@ async function main() {
     .option("-e, --extension <name>", "Extension program ID", "M0_WM")
     .argument(
       "<wrapAuthorities>",
-      "Comma-separated list of pubkeys to whitelist",
+      "Comma-separated list of pubkeys to whitelist"
     )
     .action(async (wrapAuthorities, { extension }) => {
       const [payer, ext] = keysFromEnv(["PAYER_KEYPAIR", extension]);
@@ -535,7 +543,7 @@ async function main() {
 
       const program = new Program(
         NO_YIELD_EXT_IDL,
-        anchorProvider(connection, payer),
+        anchorProvider(connection, payer)
       );
 
       const tx = new Transaction();
@@ -547,7 +555,7 @@ async function main() {
             .accounts({
               admin,
             })
-            .instruction(),
+            .instruction()
         );
       }
 
@@ -557,41 +565,46 @@ async function main() {
       sendOrSerialize(tx, connection, payer);
     });
 
-  program.command("reset-swap-authority").action(async () => {
-    const [payer] = keysFromEnv(["PAYER_KEYPAIR"]);
-    const admin = process.env.SQUADS_MULTISIG
-      ? new PublicKey(process.env.SQUADS_MULTISIG)
-      : payer.publicKey;
+  program
+    .command("reset-swap-authority")
+    .description(
+      "Reset the extension and unwrapper whitelists on the Swap Facility"
+    )
+    .action(async () => {
+      const [payer] = keysFromEnv(["PAYER_KEYPAIR"]);
+      const admin = process.env.SQUADS_MULTISIG
+        ? new PublicKey(process.env.SQUADS_MULTISIG)
+        : payer.publicKey;
 
-    const tx = new Transaction().add(
-      new TransactionInstruction({
-        programId: EXT_SWAP,
-        keys: [
-          {
-            pubkey: admin,
-            isSigner: true,
-            isWritable: false,
-          },
-          {
-            pubkey: PublicKey.findProgramAddressSync(
-              [Buffer.from("global")],
-              EXT_SWAP,
-            )[0],
-            isSigner: false,
-            isWritable: true,
-          },
-        ],
-        data: Buffer.concat([
-          Buffer.from(sha256("global:reset_whitelists").subarray(0, 8)),
-        ]),
-      }),
-    );
+      const tx = new Transaction().add(
+        new TransactionInstruction({
+          programId: EXT_SWAP,
+          keys: [
+            {
+              pubkey: admin,
+              isSigner: true,
+              isWritable: false,
+            },
+            {
+              pubkey: PublicKey.findProgramAddressSync(
+                [Buffer.from("global")],
+                EXT_SWAP
+              )[0],
+              isSigner: false,
+              isWritable: true,
+            },
+          ],
+          data: Buffer.concat([
+            Buffer.from(sha256("global:reset_whitelists").subarray(0, 8)),
+          ]),
+        })
+      );
 
-    tx.feePayer = admin;
-    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      tx.feePayer = admin;
+      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
 
-    sendOrSerialize(tx, connection, payer);
-  });
+      sendOrSerialize(tx, connection, payer);
+    });
 
   program
     .command("whitelist-swap-unwrapper")
@@ -606,7 +619,7 @@ async function main() {
 
       const swap = new Program<ExtSwap>(
         EXT_SWAP_IDL,
-        anchorProvider(connection, payer),
+        anchorProvider(connection, payer)
       );
 
       const tx = new Transaction();
@@ -618,7 +631,7 @@ async function main() {
             .accounts({
               admin,
             })
-            .instruction(),
+            .instruction()
         );
       }
 
@@ -641,7 +654,7 @@ async function main() {
 
       const extSwap = new Program<ExtSwap>(
         EXT_SWAP_IDL,
-        anchorProvider(connection, payer),
+        anchorProvider(connection, payer)
       );
 
       const tx = new Transaction();
@@ -655,7 +668,7 @@ async function main() {
               extProgram: new PublicKey(ext),
               extMint: mints[ext],
             })
-            .instruction(),
+            .instruction()
         );
       }
 
@@ -678,7 +691,7 @@ async function main() {
 
       const extSwap = new Program<ExtSwap>(
         EXT_SWAP_IDL,
-        anchorProvider(connection, payer),
+        anchorProvider(connection, payer)
       );
 
       const tx = new Transaction();
@@ -690,7 +703,7 @@ async function main() {
             .accounts({
               admin,
             })
-            .instruction(),
+            .instruction()
         );
       }
 
@@ -741,12 +754,12 @@ async function main() {
         PublicKey.findProgramAddressSync([Buffer.from("global")], EXT_SWAP)[0],
         PublicKey.findProgramAddressSync(
           [Buffer.from("global")],
-          new PublicKey("mz2vDzjbQDUDXBH6FPF5s4odCJ4y8YLE5QWaZ8XdZ9Z"),
+          new PublicKey("mz2vDzjbQDUDXBH6FPF5s4odCJ4y8YLE5QWaZ8XdZ9Z")
         )[0],
         M_MINT,
         new PublicKey("mz2vDzjbQDUDXBH6FPF5s4odCJ4y8YLE5QWaZ8XdZ9Z"), // earn
         new PublicKey("63MBrEFq6pV6RLDuC3aQTcRhZuysgFcrfDS1dsFXxv2o"), // transiever pda
-        new PublicKey("execXUrAsMnqMmTHj5m7N1YQgsDz3cwGLYCYyuDRciV"), // executor
+        new PublicKey("execXUrAsMnqMmTHj5m7N1YQgsDz3cwGLYCYyuDRciV") // executor
       );
 
       // Add common addresses for each extension
@@ -755,29 +768,29 @@ async function main() {
 
         const vault = PublicKey.findProgramAddressSync(
           [Buffer.from("m_vault")],
-          ext.publicKey,
+          ext.publicKey
         )[0];
 
         const vaultAta = getAssociatedTokenAddressSync(
           mint,
           vault,
           true,
-          TOKEN_2022_PROGRAM_ID,
+          TOKEN_2022_PROGRAM_ID
         );
 
         addressesForTable.push(
           ext.publicKey,
           PublicKey.findProgramAddressSync(
             [Buffer.from("global")],
-            ext.publicKey,
+            ext.publicKey
           )[0],
           mint,
           vault,
           PublicKey.findProgramAddressSync(
             [Buffer.from("mint_authority")],
-            ext.publicKey,
+            ext.publicKey
           )[0],
-          vaultAta,
+          vaultAta
         );
       }
 
@@ -788,11 +801,11 @@ async function main() {
             Buffer.from("inbox_rate_limit"),
             new BN(chainID).toArrayLike(Buffer, "le", 2),
           ],
-          new PublicKey("mzp1q2j5Hr1QuLC3KFBCAUz5aUckT6qyuZKZ3WJnMmY"),
+          new PublicKey("mzp1q2j5Hr1QuLC3KFBCAUz5aUckT6qyuZKZ3WJnMmY")
         )[0];
         const peer = PublicKey.findProgramAddressSync(
           [Buffer.from("peer"), new BN(chainID).toArrayLike(Buffer, "le", 2)],
-          new PublicKey("mzp1q2j5Hr1QuLC3KFBCAUz5aUckT6qyuZKZ3WJnMmY"),
+          new PublicKey("mzp1q2j5Hr1QuLC3KFBCAUz5aUckT6qyuZKZ3WJnMmY")
         )[0];
         addressesForTable.push(inbox, peer);
       }
@@ -804,7 +817,7 @@ async function main() {
           .value?.state.addresses;
         if (!state) {
           throw new Error(
-            `Failed to fetch state for address lookup table ${tableAddress}`,
+            `Failed to fetch state for address lookup table ${tableAddress}`
           );
         }
         if (state.length === 256) {
@@ -816,7 +829,7 @@ async function main() {
 
       // Dedupe missing addresses
       const toAdd = addressesForTable.filter(
-        (address) => !existingAddresses.find((a) => a.equals(address)),
+        (address) => !existingAddresses.find((a) => a.equals(address))
       );
       if (toAdd.length === 0) {
         console.log("No addresses to add");
@@ -833,7 +846,7 @@ async function main() {
           authority: owner.publicKey,
           lookupTable: tableAddress,
           addresses: toAdd,
-        }),
+        })
       );
 
       // Send transaction
@@ -857,7 +870,7 @@ async function main() {
           blockhash: blockhash.blockhash,
           lastValidBlockHeight: blockhash.lastValidBlockHeight,
         },
-        "confirmed",
+        "confirmed"
       );
       if (confirmation.value.err) {
         throw new Error(`Transaction not confirmed: ${confirmation.value.err}`);
@@ -866,6 +879,9 @@ async function main() {
 
   program
     .command("update-mint")
+    .description(
+      "Update token metadata (name, symbol, URI, or a custom field) on the extension mint"
+    )
     .option("-n, --name <string>", "Token Name")
     .option("-s, --symbol <string>", "Token Symbol")
     .option("-u, --uri <string>", "Token metadata URI")
@@ -900,11 +916,11 @@ async function main() {
         connection,
         mint.publicKey,
         "confirmed",
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       );
       if (!metadata) {
         throw new Error(
-          `No metadata found for mint ${mint.publicKey.toBase58()}`,
+          `No metadata found for mint ${mint.publicKey.toBase58()}`
         );
       }
 
@@ -923,7 +939,7 @@ async function main() {
             updateAuthority: auth,
             field: Field.Name,
             value: name,
-          }),
+          })
         );
       }
 
@@ -938,7 +954,7 @@ async function main() {
             updateAuthority: auth,
             field: Field.Symbol,
             value: symbol,
-          }),
+          })
         );
       }
 
@@ -953,7 +969,7 @@ async function main() {
             updateAuthority: auth,
             field: Field.Uri,
             value: uri,
-          }),
+          })
         );
       }
 
@@ -972,7 +988,7 @@ async function main() {
             updateAuthority: auth,
             field: key,
             value: value,
-          }),
+          })
         );
       }
 
@@ -982,14 +998,14 @@ async function main() {
       if (newSize > currentSize) {
         const accountInfo = await connection.getAccountInfo(mint.publicKey);
         const lamports = await connection.getMinimumBalanceForRentExemption(
-          accountInfo!.data.length + newSize - currentSize,
+          accountInfo!.data.length + newSize - currentSize
         );
 
         const diff = lamports - accountInfo!.lamports;
 
         if (diff > 0) {
           console.log(
-            `Mint needs ${diff} lamports to cover additional metadata size`,
+            `Mint needs ${diff} lamports to cover additional metadata size`
           );
 
           instructions.push(
@@ -997,7 +1013,7 @@ async function main() {
               fromPubkey: auth,
               toPubkey: mint.publicKey,
               lamports: diff,
-            }),
+            })
           );
         }
       }
@@ -1015,6 +1031,9 @@ async function main() {
 
   program
     .command("set-yield-recipient")
+    .description(
+      "Set the yield recipient token account for a crank-variant earner (signer must be the earn manager)"
+    )
     .option("-e, --extension <name>", "Extension name", "M0_WM")
     .argument("<user-token-account>", "User token account")
     .argument("<recipient-token-account>", "Yield recipient token account")
@@ -1035,11 +1054,11 @@ async function main() {
       const ext = new Program<CrankExt>(idl, anchorProvider(connection, payer));
       const earnerAccount = PublicKey.findProgramAddressSync(
         [Buffer.from("earner"), userTA.toBuffer()],
-        extKey.publicKey,
+        extKey.publicKey
       )[0];
       const earnManagerAccount = PublicKey.findProgramAddressSync(
         [Buffer.from("earn_manager"), earnManager.toBuffer()],
-        extKey.publicKey,
+        extKey.publicKey
       )[0];
 
       const ix = await ext.methods
@@ -1091,7 +1110,7 @@ async function createToken2022Mint(
   tokenSymbol: string,
   uri: string,
   extensions: ExtensionType[],
-  evmTokenAddress: string | null = null,
+  evmTokenAddress: string | null = null
 ) {
   const metaData: TokenMetadata = {
     updateAuthority: authority,
@@ -1107,7 +1126,7 @@ async function createToken2022Mint(
   const metadataLen = pack(metaData).length;
   const mintLen = getMintLen(extensions);
   const lamports = await connection.getMinimumBalanceForRentExemption(
-    mintLen + metadataExtension + metadataLen,
+    mintLen + metadataExtension + metadataLen
   );
 
   const instructions = [
@@ -1129,8 +1148,8 @@ async function createToken2022Mint(
             mint.publicKey,
             metadataAuthority ?? authority,
             mint.publicKey,
-            TOKEN_2022_PROGRAM_ID,
-          ),
+            TOKEN_2022_PROGRAM_ID
+          )
         );
         break;
       case ExtensionType.ScaledUiAmountConfig:
@@ -1139,8 +1158,8 @@ async function createToken2022Mint(
             mint.publicKey,
             mintAuthority, // mint authority must be scaled ui config authority
             1.0, // multiplier
-            TOKEN_2022_PROGRAM_ID,
-          ),
+            TOKEN_2022_PROGRAM_ID
+          )
         );
         break;
       case ExtensionType.TransferHook:
@@ -1149,8 +1168,8 @@ async function createToken2022Mint(
             mint.publicKey,
             transferHookAuthority ?? authority,
             PublicKey.default, // no transfer hook
-            TOKEN_2022_PROGRAM_ID,
-          ),
+            TOKEN_2022_PROGRAM_ID
+          )
         );
         break;
       case ExtensionType.ConfidentialTransferMint:
@@ -1158,8 +1177,8 @@ async function createToken2022Mint(
           createInitializeConfidentialTransferMintInstruction(
             mint.publicKey,
             confidentialTransfersAuthority ?? authority,
-            false,
-          ),
+            false
+          )
         );
         break;
       case ExtensionType.PausableConfig:
@@ -1167,8 +1186,8 @@ async function createToken2022Mint(
           createInitializePausableConfigInstruction(
             mint.publicKey,
             pauserAuthority!,
-            TOKEN_2022_PROGRAM_ID,
-          ),
+            TOKEN_2022_PROGRAM_ID
+          )
         );
         break;
       case ExtensionType.PermanentDelegate:
@@ -1176,8 +1195,8 @@ async function createToken2022Mint(
           createInitializePermanentDelegateInstruction(
             mint.publicKey,
             permanentDelegateAuthority!,
-            TOKEN_2022_PROGRAM_ID,
-          ),
+            TOKEN_2022_PROGRAM_ID
+          )
         );
         break;
       case ExtensionType.DefaultAccountState:
@@ -1185,8 +1204,8 @@ async function createToken2022Mint(
           createInitializeDefaultAccountStateInstruction(
             mint.publicKey,
             AccountState.Initialized,
-            TOKEN_2022_PROGRAM_ID,
-          ),
+            TOKEN_2022_PROGRAM_ID
+          )
         );
         break;
       default:
@@ -1201,7 +1220,7 @@ async function createToken2022Mint(
         6,
         payer.publicKey, // will transfer on last instruction
         freezeAuthority, // if null, there is no freeze authority
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       ),
       createInitializeInstruction({
         programId: TOKEN_2022_PROGRAM_ID,
@@ -1213,7 +1232,7 @@ async function createToken2022Mint(
         symbol: metaData.symbol,
         uri: metaData.uri,
       }),
-    ],
+    ]
   );
 
   if (evmTokenAddress) {
@@ -1224,7 +1243,7 @@ async function createToken2022Mint(
         updateAuthority: payer.publicKey,
         field: metaData.additionalMetadata[0][0],
         value: metaData.additionalMetadata[0][1],
-      }),
+      })
     );
   }
 
@@ -1243,9 +1262,9 @@ async function createToken2022Mint(
         AuthorityType.MintTokens,
         mintAuthority,
         undefined,
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       ),
-    ],
+    ]
   );
 
   const blockhash = await connection.getLatestBlockhash();
@@ -1264,7 +1283,7 @@ async function createToken2022Mint(
 async function sendOrSerialize(
   tx: Transaction,
   connection: Connection,
-  payer: Keypair,
+  payer: Keypair
 ) {
   if (process.env.SQUADS_MULTISIG) {
     const b = tx.serialize({ verifySignatures: false });

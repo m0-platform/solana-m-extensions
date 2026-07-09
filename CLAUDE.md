@@ -40,6 +40,8 @@ pnpm lint:fix
 
 ## Architecture
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system context, the instruction × variant matrix (including which signer each instruction requires), the PDA reference, and the yield flow per variant.
+
 ### Programs
 
 **m_ext** (`programs/m_ext/`) - M Extension program with compile-time yield distribution variants:
@@ -68,7 +70,7 @@ When modifying instruction code, check which features it applies to via `#[cfg(f
 
 ### Tests
 
-Tests use `litesvm` for fast local execution. Test programs in `tests/programs/` are pre-built with specific program IDs for testing different scenarios (ext_a.so, ext_b.so, ext_c.so).
+Tests use `litesvm` for fast local execution. Test programs in `tests/programs/` are pre-built with specific program IDs: `ext_a.so` (no-yield), `ext_b.so` (scaled-ui), `ext_c.so` (no-yield with an extra injected account in `wrap`). After changing `m_ext` instruction code, rebuild them with `make build-test-programs` — otherwise the TypeScript tests run against stale binaries.
 
 The test harness in `tests/unit/ext_test_harness.ts` provides utilities for setting up test environments with M token infrastructure.
 
@@ -79,3 +81,5 @@ The test harness in `tests/unit/ext_test_harness.ts` provides utilities for sett
 pnpm cli:dev    # Run CLI with devnet credentials
 pnpm cli:prod   # Run CLI with mainnet credentials
 ```
+
+See [services/cli/README.md](services/cli/README.md) for setup (1Password, `.env` files, `devnet-keypair.json`), the full command reference, and the Squads multisig transaction flow.

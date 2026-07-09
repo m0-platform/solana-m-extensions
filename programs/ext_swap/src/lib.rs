@@ -1,4 +1,14 @@
 #![allow(unexpected_cfgs)]
+//! # Extension Swap Program
+//!
+//! Singleton router for swapping 1:1 (by `$M` value) between whitelisted M extensions.
+//! `swap` CPIs `from_ext::unwrap` -> `to_ext::wrap`, routing the `$M` through a token account
+//! owned by the [`state::SwapGlobal`] PDA. That PDA is also the default wrap/unwrap authority
+//! for the CPIs, so every swappable extension must include it in its wrap-authority list
+//! (or the caller passes their own authority).
+//!
+//! The standalone `wrap`/`unwrap` instructions route between `$M` and a single extension:
+//! `wrap` is open to anyone, `unwrap` requires a whitelisted unwrapper.
 
 pub mod errors;
 pub mod instructions;

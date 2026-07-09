@@ -18,6 +18,13 @@ cfg_if! {
     }
 }
 
+/// Syncs the extension's yield index with the latest `$M` multiplier and returns the current
+/// ext index to use for conversions.
+///
+/// `scaled-ui`: recalculates the ext index from the `$M` multiplier (net of `fee_bps`) and,
+/// if the vault is an approved earner (token account not frozen), pushes the new multiplier
+/// to the ext mint via CPI. `no-yield`/`crank`: ext tokens are 1:1 with `$M`, so this is a
+/// no-op returning `INDEX_SCALE_U64` (1.0).
 #[allow(unused_variables)]
 pub fn sync_index<'info>(
     ext_mint: &mut InterfaceAccount<'info, Mint>,
@@ -89,6 +96,11 @@ pub fn sync_index<'info>(
     }
 }
 
+// The `_down`/`_up` pairs below exist because rounding must always favor the protocol:
+// round down what the program pays out (tokens minted/transferred to users), round up what
+// it collects, so the vault can never become undercollateralized by rounding.
+
+/// Converts a UI amount to principal (raw token units) at `index`, rounding down.
 pub fn amount_to_principal_down(amount: u64, index: u64) -> Result<u64> {
     // If the index is 1, return the amount directly
     if index == INDEX_SCALE_U64 {
@@ -106,6 +118,7 @@ pub fn amount_to_principal_down(amount: u64, index: u64) -> Result<u64> {
     Ok(principal)
 }
 
+/// Converts a UI amount to principal (raw token units) at `index`, rounding up.
 pub fn amount_to_principal_up(amount: u64, index: u64) -> Result<u64> {
     // If the index is 1, return the amount directly
     if index == INDEX_SCALE_U64 {
@@ -130,6 +143,7 @@ pub fn amount_to_principal_up(amount: u64, index: u64) -> Result<u64> {
     Ok(principal)
 }
 
+/// Converts principal (raw token units) to a UI amount at `index`, rounding down.
 pub fn principal_to_amount_down(principal: u64, index: u64) -> Result<u64> {
     // If the index is 1, return the principal directly
     if index == INDEX_SCALE_U64 {
@@ -147,6 +161,7 @@ pub fn principal_to_amount_down(principal: u64, index: u64) -> Result<u64> {
     Ok(amount)
 }
 
+/// Converts principal (raw token units) to a UI amount at `index`, rounding up.
 pub fn principal_to_amount_up(principal: u64, index: u64) -> Result<u64> {
     // If the index is 1, return the principal directly
     if index == INDEX_SCALE_U64 {

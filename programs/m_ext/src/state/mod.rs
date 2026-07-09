@@ -4,6 +4,9 @@ use cfg_if::cfg_if;
 #[constant]
 pub const EXT_GLOBAL_SEED: &[u8] = b"global";
 
+/// Per-extension global config. PDA: `["global"]`, created once by `initialize`.
+/// Holds the admin, the mint pair, the variant-specific [`YieldConfig`], and the list of
+/// accounts allowed to call `wrap`/`unwrap`. Resized on wrap-authority changes.
 #[account]
 pub struct ExtGlobalV2 {
     pub admin: Pubkey,                 // can update config values
@@ -49,6 +52,10 @@ pub enum YieldVariant {
     Crank,
 }
 
+// YieldConfig is the variant-specific portion of ExtGlobalV2; its layout differs per build:
+// - scaled-ui: fee on yield + the last synced M/ext index pair (the ext index lags M by the fee)
+// - crank:     the earn authority + last synced indices/timestamp that claims are paid against
+// - no-yield:  no state beyond the variant tag
 cfg_if! {
     if #[cfg(feature = "scaled-ui")] {
         #[derive(AnchorSerialize, AnchorDeserialize, Clone)]

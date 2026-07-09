@@ -3,6 +3,10 @@ use anchor_lang::prelude::*;
 #[constant]
 pub const EARNER_SEED: &[u8] = b"earner";
 
+/// Per-user yield state (crank variant). PDA: `["earner", user_token_account]`, created by
+/// an earn manager via `add_earner`, closed via `remove_earner`/`remove_orphaned_earner`.
+/// `claim_for` pays out yield accrued since `last_claim_index` to `recipient_token_account`
+/// if set (see `set_recipient`), otherwise to `user_token_account`.
 #[account]
 #[derive(InitSpace)]
 pub struct Earner {
