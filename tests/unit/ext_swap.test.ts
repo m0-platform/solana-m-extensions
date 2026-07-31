@@ -231,7 +231,9 @@ describe("extension swap tests (new)", () => {
       await $.swapProgram.methods
         .unwrap(new BN(1_000))
         .accounts({
-          signer: $.swapperKeypair.publicKey, // must be a whitelisted unwrapper on the swap program
+          // signer (or unwrapAuthority, if given) must be a whitelisted_unwrapper: this only gates
+          // who may receive raw M via unwrap, and is intentionally NOT enforced by swap. See unwrap.rs.
+          signer: $.swapperKeypair.publicKey,
           unwrapAuthority: $.swapProgram.programId, // placeholder for None -> use swap program authority on CPI
           mMint: $.mMint.publicKey,
           mTokenAccount: accounts.ataM,
@@ -252,6 +254,8 @@ describe("extension swap tests (new)", () => {
     it("should swap extension token A to extension token B", async () => {
       const accounts = await getTokenAccounts();
 
+      // swap does NOT check whitelisted_unwrappers (that only gates receiving raw M via unwrap);
+      // swapperKeypair being whitelisted here is incidental, not a requirement of swap.
       await $.swapProgram.methods
         .swap(new BN(1_000), 0)
         .accounts({
