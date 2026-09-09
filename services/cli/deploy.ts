@@ -27,8 +27,8 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("deploy-program")
-    .option("-t, --type <type>", "Yield type", "scaled-ui")
-    .option("-e, --extension <name>", "Extension program ID", "USDK")
+    .requiredOption("-t, --type <type>", "Yield type") // no-yield, scaled-ui
+    .requiredOption("-e, --extension <name>", "Extension program ID") // e.g. USDK
     .option("-c, --computePrice <number>", "Compute price", "300000")
     .action(({ type, extension, computePrice }) => {
       const [pid] = keysFromEnv([extension]);
@@ -62,17 +62,21 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("set-idl")
-    .option("-t, --type <type>", "Yield type", "scaled-ui")
-    .option("-e, --extension <name>", "Extension program ID", "USDKY")
-    .option("-i, --init", "Extension program ID", false)
+    .requiredOption("-t, --type <type>", "Yield type") // e.g. scaled-ui
+    .requiredOption("-e, --extension <name>", "Extension program ID") // e.g. USDKy
+    .option("--skip-build", "Skip building the program", false) // if deployment was done immediately before, rebuilding is not required.
+    .option("-i, --init", "Upload IDL for the first time", false) // indicates if the data account to store the IDL is created in this transaction.
     .option("-s, --swapProgram", "Update swap program", false)
-    .action(({ type, extension, init, swapProgram }) => {
+    .action(({ type, extension, skipBuild, init, swapProgram }) => {
       const [pid] = keysFromEnv([extension]);
       const pubkey = swapProgram ? EXT_SWAP_PID : pid.publicKey.toBase58();
 
-      console.log(`Building and initializing IDL for extension ${pubkey}`);
+      if (!skipBuild) {
+        console.log(`Building IDL for extension ${pubkey}`);
+        buildProgram(pubkey, type, false, swapProgram);
+      }
 
-      buildProgram(pubkey, type, false, swapProgram);
+      console.log(`Uploading IDL for extension ${pubkey}`);
 
       if (swapProgram) {
         postSwapIDL();
@@ -80,6 +84,8 @@ const opts: shell.ExecOptions & { async: false } = {
       }
 
       postIDL(pubkey, init);
+
+      console.log("IDL successfully uploaded")
     });
 
   program
@@ -582,7 +588,15 @@ function setProgramID(pid: string) {
 }
 
 function keysFromEnv(keys: string[]) {
-  return keys.map((key) =>
-    Keypair.fromSecretKey(Buffer.from(JSON.parse(process.env[key]!))),
-  );
+  const foundKeys = keys.map((key) => {
+    const val = process.env[key];
+    if (val === undefined) {
+      console.error(`environment variable ${key} must be set`);
+      process.exit(1);
+    }
+
+    return Keypair.fromSecretKey(Buffer.from(JSON.parse(val)))
+  });
+
+  return foundKeys;
 }
