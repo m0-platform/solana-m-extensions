@@ -41,6 +41,10 @@ cfg_if! {
     }
 }
 
+/// Resizes and rewrites the V1 global account into the [`ExtGlobalV2`] layout and points the
+/// extension at the V2 `$M` mint. See the module header above for the three supported
+/// migration paths. Admin-only; requires the new vault `$M` ATA to exist, be thawed, and
+/// cover the outstanding ext supply.
 #[derive(Accounts)]
 pub struct MigrateM<'info> {
     /// Note: this account is mutable to pay for the resize operation

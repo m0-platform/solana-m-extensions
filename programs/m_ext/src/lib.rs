@@ -1,4 +1,21 @@
 #![allow(unexpected_cfgs)]
+//! # M Extension Program
+//!
+//! Wraps `$M` into an extension stablecoin with a yield distribution strategy chosen at
+//! compile time. Exactly one yield feature must be enabled (validated below):
+//!
+//! - `no-yield` (default): holders earn nothing; the admin claims the vault surplus via `claim_fees`
+//! - `scaled-ui`: yield reaches all holders by updating a Token2022 `ScaledUiAmount` multiplier
+//!   on the ext mint, minus an optional fee
+//! - `crank`: an earn authority distributes yield per registered earner via `claim_for`
+//!
+//! `migrate` adds V1 -> V2 migration; `wm` = `crank` + `migrate` (the wM extension).
+//!
+//! Each extension is a separate deployment of this program under its own program ID. `$M`
+//! collateral sits in an ATA owned by the `m_vault` PDA; ext tokens are minted/burned against
+//! it via `wrap`/`unwrap`, callable only by the wrap authorities stored in
+//! [`state::ExtGlobalV2`]. See `docs/ARCHITECTURE.md` for the instruction/variant matrix and
+//! PDA reference.
 
 pub mod constants;
 pub mod errors;

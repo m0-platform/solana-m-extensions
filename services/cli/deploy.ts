@@ -27,6 +27,9 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("deploy-program")
+    .description(
+      "Build a yield variant for an extension (verifiable build) and deploy it"
+    )
     .option("-t, --type <type>", "Yield type", "scaled-ui")
     .option("-e, --extension <name>", "Extension program ID", "USDK")
     .option("-c, --computePrice <number>", "Compute price", "300000")
@@ -42,7 +45,10 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("transfer-upgrade-auth")
-    .argument("programID")
+    .description(
+      "Transfer a program's upgrade authority to the Squads multisig"
+    )
+    .argument("programID", "Program ID to transfer the upgrade authority of")
     .action((programID) => {
       const pid = new PublicKey(programID);
 
@@ -53,7 +59,7 @@ const opts: shell.ExecOptions & { async: false } = {
           --skip-new-upgrade-authority-signer-check \
           --keypair devnet-keypair.json \
           --url ${process.env.RPC_URL}`,
-        opts,
+        opts
       );
       if (result.code !== 0) throw new Error(`Build failed: ${result.stderr}`);
 
@@ -62,9 +68,14 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("set-idl")
+    .description("Build a program and post its IDL on-chain")
     .option("-t, --type <type>", "Yield type", "scaled-ui")
     .option("-e, --extension <name>", "Extension program ID", "USDKY")
-    .option("-i, --init", "Extension program ID", false)
+    .option(
+      "-i, --init",
+      "Initialize the IDL account instead of upgrading",
+      false
+    )
     .option("-s, --swapProgram", "Update swap program", false)
     .action(({ type, extension, init, swapProgram }) => {
       const [pid] = keysFromEnv([extension]);
@@ -84,6 +95,9 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("upgrade-program")
+    .description(
+      "Build and write an upgrade buffer, then upgrade the program (or hand the buffer to the Squads multisig with --squadsAuth)"
+    )
     .option("-t, --type <type>", "Yield type", "scaled-ui")
     .option("-e, --extension <name>", "Extension program ID", "USDK")
     .option("-c, --computePrice <number>", "Compute price", "300000")
@@ -106,7 +120,7 @@ const opts: shell.ExecOptions & { async: false } = {
 
         if (!skipBuild) buildProgram(pubkey, type, migrate, swapProgram);
         updateProgram(pubkey, parseInt(computePrice), squadsAuth, swapProgram);
-      },
+      }
     );
 
   program
@@ -116,12 +130,12 @@ const opts: shell.ExecOptions & { async: false } = {
     .option(
       "-b, --binary <path>",
       "Path to the new program binary",
-      "target/verifiable/m_ext.so",
+      "target/verifiable/m_ext.so"
     )
     .action(async (programId, { binary }) => {
       if (!fs.existsSync(binary)) {
         throw new Error(
-          `Binary not found at ${binary}. Build the program first.`,
+          `Binary not found at ${binary}. Build the program first.`
         );
       }
 
@@ -137,17 +151,17 @@ const opts: shell.ExecOptions & { async: false } = {
 
       // BPF Upgradeable Loader "Program" variant: 4-byte discriminator + 32-byte programdata address
       const programDataAddress = new PublicKey(
-        programAccount.data.subarray(4, 36),
+        programAccount.data.subarray(4, 36)
       );
 
       // ProgramData header: 4 (discriminator) + 8 (slot) + 1 (Option tag) + 32 (authority) = 45 bytes
       const PROGRAMDATA_HEADER_SIZE = 45;
       const programDataAccount = await connection.getAccountInfo(
-        programDataAddress,
+        programDataAddress
       );
       if (!programDataAccount) {
         throw new Error(
-          `ProgramData account not found: ${programDataAddress.toBase58()}`,
+          `ProgramData account not found: ${programDataAddress.toBase58()}`
         );
       }
 
@@ -157,7 +171,7 @@ const opts: shell.ExecOptions & { async: false } = {
 
       if (additionalBytes <= 0) {
         console.log(
-          `Program already has enough space (current: ${currentDataLength}, needed: ${newBinarySize})`,
+          `Program already has enough space (current: ${currentDataLength}, needed: ${newBinarySize})`
         );
         return;
       }
@@ -168,7 +182,7 @@ const opts: shell.ExecOptions & { async: false } = {
 
       // Build the BPF Loader ExtendProgram instruction
       const BPF_LOADER_UPGRADEABLE = new PublicKey(
-        "BPFLoaderUpgradeab1e11111111111111111111111",
+        "BPFLoaderUpgradeab1e11111111111111111111111"
       );
 
       const data = Buffer.alloc(8);
@@ -213,7 +227,7 @@ const opts: shell.ExecOptions & { async: false } = {
     .option(
       "-r, --recipient <pubkey>",
       "Refund recipient",
-      "D76ySoHPwD8U2nnTTDqXeUJQg5UkD9UD1PUE1rnvPAGm",
+      "D76ySoHPwD8U2nnTTDqXeUJQg5UkD9UD1PUE1rnvPAGm"
     )
     .action(async ({ recipient }) => {
       const authorityPubkey = new PublicKey(process.env.SQUADS_MULTISIG!);
@@ -221,7 +235,7 @@ const opts: shell.ExecOptions & { async: false } = {
 
       const connection = new Connection(process.env.RPC_URL!);
       const BPF_LOADER_UPGRADEABLE = new PublicKey(
-        "BPFLoaderUpgradeab1e11111111111111111111111",
+        "BPFLoaderUpgradeab1e11111111111111111111111"
       );
 
       // Find all buffer accounts owned by the authority
@@ -239,13 +253,13 @@ const opts: shell.ExecOptions & { async: false } = {
               memcmp: {
                 offset: 4,
                 bytes: bs58.encode(
-                  Buffer.concat([Buffer.from([1]), authorityPubkey.toBuffer()]),
+                  Buffer.concat([Buffer.from([1]), authorityPubkey.toBuffer()])
                 ),
               },
             }, // Option::Some(authority)
           ],
           dataSlice: { offset: 0, length: 0 },
-        },
+        }
       );
 
       if (accounts.length === 0) {
@@ -269,7 +283,7 @@ const opts: shell.ExecOptions & { async: false } = {
               { pubkey: authorityPubkey, isSigner: true, isWritable: false },
             ],
             data,
-          }),
+          })
       );
 
       const { blockhash } = await connection.getLatestBlockhash();
@@ -288,12 +302,15 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("verify-pda-txn")
+    .description(
+      "Export the solana-verify PDA transaction for a commit hash (verified builds registry)"
+    )
     .option("-t, --type <type>", "Yield type", "scaled-ui")
     .option("-e, --extension <name>", "Extension program ID", "USDK")
     .option(
       "-h, --hash <name>",
       "Commit hash",
-      "88a692239f1c336d412d591c78bbf31043ad0af2",
+      "88a692239f1c336d412d591c78bbf31043ad0af2"
     )
     .action(({ type, extension, hash }) => {
       const [pid] = keysFromEnv([extension]);
@@ -322,14 +339,14 @@ const opts: shell.ExecOptions & { async: false } = {
 
       if (!fs.existsSync(binaryPath)) {
         throw new Error(
-          `Binary not found at ${binaryPath}. Build the program first or remove --skipBuild.`,
+          `Binary not found at ${binaryPath}. Build the program first or remove --skipBuild.`
         );
       }
 
       // Get on-chain program hash
       const onChainResult = shell.exec(
         `solana-verify get-program-hash -u ${process.env.RPC_URL} ${pubkey}`,
-        opts,
+        opts
       );
       if (onChainResult.code !== 0) {
         throw new Error(`Failed to get on-chain hash: ${onChainResult.stderr}`);
@@ -339,7 +356,7 @@ const opts: shell.ExecOptions & { async: false } = {
       // Get local executable hash
       const localResult = shell.exec(
         `solana-verify get-executable-hash ${binaryPath}`,
-        opts,
+        opts
       );
       if (localResult.code !== 0) {
         throw new Error(`Failed to get local hash: ${localResult.stderr}`);
@@ -351,11 +368,11 @@ const opts: shell.ExecOptions & { async: false } = {
 
       if (onChainHash === localHash) {
         console.log(
-          "\n✅ Hashes match — local build is verified against the deployed program.",
+          "\n✅ Hashes match — local build is verified against the deployed program."
         );
       } else {
         console.log(
-          "\n❌ Hash mismatch — local build does NOT match the deployed program.",
+          "\n❌ Hash mismatch — local build does NOT match the deployed program."
         );
         process.exit(1);
       }
@@ -363,6 +380,7 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("submit-verify-job")
+    .description("Submit a remote solana-verify verification job")
     .option("-e, --extension <name>", "Extension program ID", "USDK")
     .action(({ type, extension, hash }) => {
       const [pid] = keysFromEnv([extension]);
@@ -372,7 +390,7 @@ const opts: shell.ExecOptions & { async: false } = {
         `solana-verify remote submit-job \ 
           --program-id ${pubkey} \ 
           --uploader ${process.env.SQUADS_MULTISIG}`,
-        opts,
+        opts
       );
 
       console.log(`Submit verify job: ${result.stdout}`);
@@ -385,7 +403,7 @@ function buildProgram(
   pid: string,
   yieldFeature: string,
   includeMigrate = false,
-  swapProgram = false,
+  swapProgram = false
 ) {
   // remove old binary
   shell.rm("-f", "target/verifiable/m_ext.so");
@@ -398,7 +416,7 @@ function buildProgram(
       `anchor build -p ext_swap --verifiable ${
         includeMigrate ? "-- --features migrate" : ""
       }`,
-      opts,
+      opts
     );
     if (res.code !== 0) throw new Error(`Swap build failed: ${res.stderr}`);
     return;
@@ -425,7 +443,7 @@ function buildProgram(
     }${
       pid === "wMXX1K1nca5W4pZr1piETe78gcAVVrEFi9f4g46uXko" ? ",wm" : ""
     } --no-default-features`,
-    opts,
+    opts
   );
   if (result.code !== 0) {
     throw new Error(`Build failed: ${result.stderr}`);
@@ -446,7 +464,7 @@ function deployProgram(programKeypair: Keypair, computePrice: number) {
       --max-sign-attempts 3 \
       --program-id pid.json \
       target/verifiable/m_ext.so`,
-    opts,
+    opts
   );
 
   // delete the temporary pid keypair file
@@ -463,12 +481,12 @@ function updateProgram(
   pid: string,
   computePrice: number,
   squadsAuth = false,
-  swapProgram = false,
+  swapProgram = false
 ) {
   // create a temporary buffer to write the upgrade to
   shell.exec(
     "solana-keygen new --no-bip39-passphrase --force -s --outfile=buffer.json",
-    opts,
+    opts
   );
 
   const bufferAddress = shell
@@ -485,7 +503,7 @@ function updateProgram(
       --max-sign-attempts 3 \
       --buffer buffer.json \
       target/verifiable/${swapProgram ? "ext_swap" : "m_ext"}.so`,
-    opts,
+    opts
   );
   if (result.code !== 0) {
     throw new Error(`Buffer write failed: ${result.stderr}`);
@@ -502,7 +520,7 @@ function updateProgram(
         --keypair devnet-keypair.json \
         --new-buffer-authority ${auth} \
          ${bufferAddress} `,
-      opts,
+      opts
     );
     if (result.code !== 0) {
       throw new Error(`Set buffer authority failed: ${result.stderr}`);
@@ -518,7 +536,7 @@ function updateProgram(
       --keypair devnet-keypair.json \
       ${bufferAddress} \
       ${swapProgram ? "MSwapi3WhNKMUGm9YrxGhypgUEt7wYQH3ZgG32XoWzH" : pid}`,
-    opts,
+    opts
   );
   if (result.code !== 0) {
     throw new Error(`Upgrade failed: ${result.stderr}`);
@@ -537,7 +555,7 @@ function postIDL(pid: string, init = false) {
       --provider.cluster ${process.env.RPC_URL} \
       --provider.wallet devnet-keypair.json \
       ${pid}`,
-    opts,
+    opts
   );
 }
 
@@ -548,7 +566,7 @@ function postSwapIDL() {
       --provider.cluster ${process.env.RPC_URL} \
       --provider.wallet devnet-keypair.json \
       MSwapi3WhNKMUGm9YrxGhypgUEt7wYQH3ZgG32XoWzH`,
-    opts,
+    opts
   );
 }
 
@@ -556,7 +574,7 @@ function verifyPdaTransaction(
   pid: string,
   yieldFeature: string,
   commitHash: string,
-  libraryName = "m_ext",
+  libraryName = "m_ext"
 ) {
   const result = shell.exec(
     `solana-verify export-pda-tx \
@@ -566,7 +584,7 @@ function verifyPdaTransaction(
       --commit-hash ${commitHash} \
       --uploader ${process.env.SQUADS_MULTISIG} \
       -- --features ${yieldFeature} --no-default-features`,
-    opts,
+    opts
   );
 
   console.log(`PDA verification transaction: ${result.stdout}`);
@@ -577,12 +595,12 @@ function setProgramID(pid: string) {
     "-i",
     /declare_id!\("[^"]*"\)/,
     `declare_id!("${pid}")`,
-    "programs/m_ext/src/lib.rs",
+    "programs/m_ext/src/lib.rs"
   );
 }
 
 function keysFromEnv(keys: string[]) {
   return keys.map((key) =>
-    Keypair.fromSecretKey(Buffer.from(JSON.parse(process.env[key]!))),
+    Keypair.fromSecretKey(Buffer.from(JSON.parse(process.env[key]!)))
   );
 }
