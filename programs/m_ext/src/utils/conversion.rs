@@ -130,6 +130,25 @@ pub fn amount_to_principal_up(amount: u64, index: u64) -> Result<u64> {
     Ok(principal)
 }
 
+pub fn convert_principal_down(principal: u64, from_index: u64, to_index: u64) -> Result<u64> {
+    // If the indices are the same, return the principal directly
+    if from_index == to_index {
+        return Ok(principal);
+    }
+
+    // Convert the principal from one index basis to the other, rounding down.
+    // The result satisfies: converted * to_index <= principal * from_index,
+    // so the value of the output never exceeds the value of the input.
+    let converted: u64 = (principal as u128)
+        .checked_mul(from_index as u128)
+        .ok_or(ExtError::MathOverflow)?
+        .checked_div(to_index as u128)
+        .ok_or(ExtError::MathUnderflow)?
+        .try_into()?;
+
+    Ok(converted)
+}
+
 pub fn principal_to_amount_down(principal: u64, index: u64) -> Result<u64> {
     // If the index is 1, return the principal directly
     if index == INDEX_SCALE_U64 {
@@ -295,6 +314,61 @@ cfg_if! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_convert_principal_down() {
+        // Same index returns the principal unchanged
+        assert_eq!(
+            convert_principal_down(25, 1043000000000u64, 1043000000000u64).unwrap(),
+            25
+        );
+
+        // Exact conversion: 22 * 1.1 / 1.043 = 23.202... -> 23
+        assert_eq!(
+            convert_principal_down(22, 1100000000000u64, 1043000000000u64).unwrap(),
+            23
+        );
+
+        // Rounds down: 21 * 1.1 / 1.043 = 22.147... -> 22
+        assert_eq!(
+            convert_principal_down(21, 1100000000000u64, 1043000000000u64).unwrap(),
+            22
+        );
+
+        // Value invariant: converted * to_index <= principal * from_index
+        for principal in [1u64, 21, 22, 23, 24, 25, 1_000_000, u32::MAX as u64] {
+            for (from, to) in [
+                (1043000000000u64, 1100000000000u64),
+                (1100000000000u64, 1043000000000u64),
+                (1000000000000u64, 1136363636363u64),
+            ] {
+                let converted = convert_principal_down(principal, from, to).unwrap();
+                assert!((converted as u128) * (to as u128) <= (principal as u128) * (from as u128));
+            }
+        }
+    }
+
+    #[test]
+    fn test_wrap_unwrap_rounding_covers_vault() {
+        // PROTO-1030 regression at the reported index shape:
+        // ext_index ~1.043, m_index ~1.1 (scaled by 1e12)
+        let e = 1043000000000u64;
+        let m = 1100000000000u64;
+
+        for amount in 1u64..1000 {
+            // unwrap: burn ceil(amount/e) ext, release floor(amount/m) M
+            let burned = amount_to_principal_up(amount, e).unwrap();
+            let released = amount_to_principal_down(amount, m).unwrap();
+            // ext value burned must cover M value released
+            assert!((burned as u128) * (e as u128) >= (released as u128) * (m as u128));
+
+            // wrap: pull floor(amount/m) M, mint ext derived from the M principal received
+            let pulled = amount_to_principal_down(amount, m).unwrap();
+            let minted = convert_principal_down(pulled, m, e).unwrap();
+            // M value received must cover ext value minted
+            assert!((pulled as u128) * (m as u128) >= (minted as u128) * (e as u128));
+        }
+    }
 
     cfg_if! {
         if #[cfg(feature = "scaled-ui")] {

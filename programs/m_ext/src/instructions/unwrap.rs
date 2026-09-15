@@ -5,7 +5,9 @@ use crate::{
     errors::ExtError,
     state::{ExtGlobalV2, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED, M_VAULT_SEED},
     utils::{
-        conversion::{amount_to_principal_down, multiplier_to_index, sync_index},
+        conversion::{
+            amount_to_principal_down, amount_to_principal_up, multiplier_to_index, sync_index,
+        },
         token::{burn_tokens, transfer_tokens_from_program},
     },
 };
@@ -114,10 +116,8 @@ impl Unwrap<'_> {
             authority_seeds,
             &ctx.accounts.ext_token_program,
         )?;
-        // Calculate the principal amount of ext tokens to unwrap from the amount of ext tokens provided
-        // For extension tokens that do not use scaled ui, this will be a 1:1 conversion
-        // For scaled ui extensions, it rounds down slightly, similar to how wrapping rounded down
-        let ext_principal = amount_to_principal_down(amount, ext_index)?;
+        // Round the burned ext principal up so its value always covers the M released (Immunefi #92952)
+        let ext_principal = amount_to_principal_up(amount, ext_index)?;
 
         // Get the current multiplier for the m_mint
         let m_scaled_ui_config =

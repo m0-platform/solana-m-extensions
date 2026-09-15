@@ -23,6 +23,10 @@ const initialSupply = new BN(100_000_000); // 100 tokens with 6 decimals
 const initialIndex = new BN(1_100_000_000_000); // 1.1 with 12 decimals
 const ONE = new BN(1_000_000_000_000); // 1.0 with 12 decimals
 
+// Wrap mints from the M principal received and unwrap rounds the burn up (PROTO-1030),
+// so a UI balance can sit up to 2 raw units (~4 UI at index < 2) from the request.
+const UI_ROUNDING_TOLERANCE = new BN(4);
+
 const VARIANTS = [
   [Variant.NoYield, TOKEN_2022_PROGRAM_ID],
   [Variant.NoYield, TOKEN_PROGRAM_ID],
@@ -2465,7 +2469,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 toExtTokenAccount,
                 toExtTokenAccountUiBalance!.add(wrapAmount),
                 Comparison.LessThanOrEqual,
-                new BN(2),
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -2536,7 +2540,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 toExtTokenAccount,
                 toExtTokenAccountUiBalance!.add(wrapAmount),
                 Comparison.LessThanOrEqual,
-                new BN(2),
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -2614,7 +2618,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 toExtTokenAccount,
                 toExtTokenAccountUiBalance!.add(wrapAmount),
                 Comparison.LessThanOrEqual,
-                new BN(2),
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -2642,18 +2646,24 @@ for (const [variant, tokenProgramId] of VARIANTS) {
             // Wrap with UI amount
             await $.wrap($.wrapAuthority, wrapAmount);
 
-            // Unwrap with the same UI amount
-            // This ensures we burn ext_principal = wrapAmount * 1e12 / ext_index
-            // and receive m_principal = wrapAmount * 1e12 / m_index
-            await $.unwrap($.wrapAuthority, wrapAmount);
+            // Unwrap the redeemable UI value of the ext tokens actually received
+            const extBalance = await $.getTokenBalance(
+              toExtTokenAccount,
+              $.useToken2022ForExt,
+            );
+            const unwrapAmount = $.principalToAmountDown(
+              extBalance,
+              await $.getEffectiveExtIndex(),
+            );
+            await $.unwrap($.wrapAuthority, unwrapAmount);
 
             // Confirm the final balance is the same as the starting balance
             // Using tolerance since there may be rounding in principal calculations
-            $.expectTokenBalance(
+            await $.expectTokenBalance(
               fromMTokenAccount,
               startingBalance,
               Comparison.LessThanOrEqual,
-              new BN(2),
+              new BN(3),
             );
           });
 
@@ -2786,7 +2796,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 toExtTokenAccount,
                 toExtTokenAccountUiBalance!.add(wrapAmount),
                 Comparison.LessThanOrEqual,
-                new BN(2),
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -2868,7 +2878,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 toExtTokenAccount,
                 toExtTokenAccountUiBalance!.add(wrapAmount),
                 Comparison.LessThanOrEqual,
-                new BN(2),
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -2890,15 +2900,28 @@ for (const [variant, tokenProgramId] of VARIANTS) {
             // Wrap with UI amount
             await $.wrap($.nonWrapAuthority, wrapAmount, $.wrapAuthority);
 
-            // Unwrap with the same UI amount
-            await $.unwrap($.nonWrapAuthority, wrapAmount, $.wrapAuthority);
+            // Unwrap the redeemable UI value of the ext tokens actually received
+            const nonWrapAuthExtAta = await $.getATA(
+              $.extMint.publicKey,
+              $.nonWrapAuthority.publicKey,
+              $.useToken2022ForExt,
+            );
+            const extBalance = await $.getTokenBalance(
+              nonWrapAuthExtAta,
+              $.useToken2022ForExt,
+            );
+            const unwrapAmount = $.principalToAmountDown(
+              extBalance,
+              await $.getEffectiveExtIndex(),
+            );
+            await $.unwrap($.nonWrapAuthority, unwrapAmount, $.wrapAuthority);
 
             // Confirm the final balance is the same as the starting balance
-            $.expectTokenBalance(
+            await $.expectTokenBalance(
               fromMTokenAccount,
               startingBalance,
               Comparison.LessThanOrEqual,
-              new BN(2),
+              new BN(3),
             );
           });
         });
@@ -3011,7 +3034,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                   toExtTokenAccount,
                   toExtTokenAccountUiBalance!.add(wrapAmount),
                   Comparison.LessThanOrEqual,
-                  new BN(2),
+                  UI_ROUNDING_TOLERANCE,
                 );
               }
               // Confirm the extension is solvent
@@ -3091,7 +3114,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                   toExtTokenAccount,
                   toExtTokenAccountUiBalance!.add(wrapAmount),
                   Comparison.LessThanOrEqual,
-                  new BN(2),
+                  UI_ROUNDING_TOLERANCE,
                 );
               }
               // Confirm the extension is solvent
@@ -3172,7 +3195,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                   toExtTokenAccount,
                   toExtTokenAccountUiBalance!.add(wrapAmount),
                   Comparison.LessThanOrEqual,
-                  new BN(2),
+                  UI_ROUNDING_TOLERANCE,
                 );
               }
               // Confirm the extension is solvent
@@ -3270,7 +3293,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                     .div(startMultiplier)
                     .add(wrapAmount),
                   Comparison.Equal,
-                  new BN(2),
+                  UI_ROUNDING_TOLERANCE,
                 );
               }
 
@@ -3363,7 +3386,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                     .div(startMultiplier)
                     .add(wrapAmount),
                   Comparison.Equal,
-                  new BN(2),
+                  UI_ROUNDING_TOLERANCE,
                 );
               }
               // Confirm the extension is solvent
@@ -3455,7 +3478,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                     .div(startMultiplier)
                     .add(wrapAmount),
                   Comparison.Equal,
-                  new BN(2),
+                  UI_ROUNDING_TOLERANCE,
                 );
               }
               // Confirm the extension is solvent
@@ -3563,12 +3586,26 @@ for (const [variant, tokenProgramId] of VARIANTS) {
 
             const wrapAuthority = $.wrapAuthority;
             const wrapAmount = new BN(1000);
+            const extAta = await $.getATA(
+              $.extMint.publicKey,
+              wrapAuthority.publicKey,
+              $.useToken2022ForExt,
+            );
 
-            // Perform 10 wrap/unwrap cycles
+            // Perform 10 wrap/unwrap cycles, unwrapping the redeemable UI
+            // value of the ext actually received each cycle
             for (let i = 0; i < 10; i++) {
               await $.wrap(wrapAuthority, wrapAmount);
               $.svm.expireBlockhash();
-              await $.unwrap(wrapAuthority, wrapAmount);
+              const extBalance = await $.getTokenBalance(
+                extAta,
+                $.useToken2022ForExt,
+              );
+              const unwrapAmount = $.principalToAmountDown(
+                extBalance,
+                await $.getEffectiveExtIndex(),
+              );
+              await $.unwrap(wrapAuthority, unwrapAmount);
               $.svm.expireBlockhash();
             }
 
@@ -4022,7 +4059,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               randomInt(1, wrappedAmount.toNumber() + 1),
             );
             const { mPrincipal, extPrincipal } =
-              await $.getExpectedWrapPrincipals(unwrapAmount);
+              await $.getExpectedUnwrapPrincipals(unwrapAmount);
 
             // Approve (delegate) the wrap authority to spend the non-wrap authority's ext tokens
             const { sourceATA: fromExtTokenAccount } = await $.approve(
@@ -4080,8 +4117,8 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               await $.expectTokenUiBalance(
                 fromExtTokenAccount,
                 fromExtTokenAccountUiBalance!.sub(unwrapAmount),
-                Comparison.GreaterThanOrEqual,
-                new BN(2),
+                Comparison.Equal,
+                UI_ROUNDING_TOLERANCE,
               );
             }
             await $.expectTokenBalance(
@@ -4126,7 +4163,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               randomInt(1, wrappedAmount.toNumber() + 1),
             );
             const { mPrincipal, extPrincipal } =
-              await $.getExpectedWrapPrincipals(unwrapAmount);
+              await $.getExpectedUnwrapPrincipals(unwrapAmount);
 
             // Send the instruction
             await $.ext.methods
@@ -4165,8 +4202,8 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               await $.expectTokenUiBalance(
                 fromExtTokenAccount,
                 fromExtTokenAccountBalanceUi!.sub(unwrapAmount),
-                Comparison.GreaterThanOrEqual,
-                new BN(2),
+                Comparison.Equal,
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -4204,7 +4241,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               randomInt(1, wrappedAmount.toNumber() + 1),
             );
             const { mPrincipal, extPrincipal } =
-              await $.getExpectedWrapPrincipals(unwrapAmount);
+              await $.getExpectedUnwrapPrincipals(unwrapAmount);
 
             // Send the instruction
             await $.ext.methods
@@ -4243,8 +4280,8 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               await $.expectTokenUiBalance(
                 fromExtTokenAccount,
                 fromExtTokenAccountBalanceUi!.sub(unwrapAmount),
-                Comparison.GreaterThanOrEqual,
-                new BN(2),
+                Comparison.Equal,
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -4404,7 +4441,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               randomInt(1, wrappedAmount.toNumber() + 1),
             );
             const { mPrincipal, extPrincipal } =
-              await $.getExpectedWrapPrincipals(unwrapAmount);
+              await $.getExpectedUnwrapPrincipals(unwrapAmount);
 
             // Send the instruction
             await $.ext.methods
@@ -4443,8 +4480,8 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               await $.expectTokenUiBalance(
                 fromExtTokenAccount,
                 fromExtTokenAccountBalanceUi!.sub(unwrapAmount),
-                Comparison.GreaterThanOrEqual,
-                new BN(2),
+                Comparison.Equal,
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -4492,7 +4529,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               randomInt(1, wrappedAmount.toNumber() + 1),
             );
             const { mPrincipal, extPrincipal } =
-              await $.getExpectedWrapPrincipals(unwrapAmount);
+              await $.getExpectedUnwrapPrincipals(unwrapAmount);
 
             // Send the instruction
             await $.ext.methods
@@ -4531,8 +4568,8 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               await $.expectTokenUiBalance(
                 fromExtTokenAccount,
                 fromExtTokenAccountBalanceUi!.sub(unwrapAmount),
-                Comparison.GreaterThanOrEqual,
-                new BN(2),
+                Comparison.Equal,
+                UI_ROUNDING_TOLERANCE,
               );
             }
           });
@@ -4611,7 +4648,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
 
             // Get principals after sync (instruction may have synced the indices)
             const { mPrincipal, extPrincipal } =
-              await $.getExpectedWrapPrincipals(unwrapAmount);
+              await $.getExpectedUnwrapPrincipals(unwrapAmount);
 
             // Get new multiplier
             const newMultiplier = new BN(
@@ -4646,7 +4683,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                   .div(startMultiplier)
                   .sub(unwrapAmount),
                 Comparison.Equal,
-                new BN(2),
+                UI_ROUNDING_TOLERANCE,
               );
             }
 
@@ -4706,7 +4743,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
 
             // Get principals after sync (instruction may have synced the indices)
             const { mPrincipal, extPrincipal } =
-              await $.getExpectedWrapPrincipals(unwrapAmount);
+              await $.getExpectedUnwrapPrincipals(unwrapAmount);
 
             // Get new multiplier
             const newMultiplier = new BN(
@@ -4741,7 +4778,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                   .div(startMultiplier)
                   .sub(unwrapAmount),
                 Comparison.Equal,
-                new BN(2),
+                UI_ROUNDING_TOLERANCE,
               );
             }
 
@@ -4800,7 +4837,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
 
             // Get principals after sync (instruction may have synced the indices)
             const { mPrincipal, extPrincipal } =
-              await $.getExpectedWrapPrincipals(unwrapAmount);
+              await $.getExpectedUnwrapPrincipals(unwrapAmount);
 
             // Get new multiplier
             const newMultiplier = new BN(
@@ -4835,7 +4872,7 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                   .div(startMultiplier)
                   .sub(unwrapAmount),
                 Comparison.Equal,
-                new BN(2),
+                UI_ROUNDING_TOLERANCE,
               );
             }
 
@@ -4889,6 +4926,143 @@ for (const [variant, tokenProgramId] of VARIANTS) {
             );
           });
         });
+      });
+    });
+
+    // Immunefi #92952: independent flooring let wrap/unwrap loops net M out of the vault. PROTO-1030 fixes it.
+    describe("PROTO-1030 rounding regression tests", () => {
+      const mintAmount = new BN(100_000_000); // 100 with 6 decimals
+      const initialWrappedAmount = new BN(100_000_000);
+      const feeBps = new BN(2500);
+      const startIndex = new BN(1_320_000_000_000); // 1.32 with 12 decimals
+
+      beforeEach(async () => {
+        const wrapAuthorities = [$.admin.publicKey, $.wrapAuthority.publicKey];
+
+        await $.initializeExt(wrapAuthorities, feeBps);
+        await $.addMEarner($.wrapAuthority.publicKey);
+        await $.mintM($.wrapAuthority.publicKey, mintAmount);
+
+        // Seed the vault so it has a balance to (attempt to) drain
+        await $.wrap($.admin, initialWrappedAmount);
+
+        // Move the M index so the M and ext indices diverge
+        await $.propagateIndex(startIndex);
+        if (variant === Variant.ScaledUi) {
+          await $.sync();
+        }
+
+        // Claim excess collateral so a leak is visible against the invariant
+        try {
+          await $.claimFees();
+        } catch (e) {
+          // Ignore the error if there are no excess tokens
+        }
+      });
+
+      // The report's 24-then-25 shape: adjacent amounts with equal floor-burn but different floor-release
+      test("closed unwrap/wrap loop does not net M out of the vault", async () => {
+        if (variant !== Variant.ScaledUi) return;
+
+        const mIndex = await $.getCurrentMIndex();
+        const extIndex = await $.getEffectiveExtIndex();
+        expect(extIndex.lt(mIndex)).toBe(true);
+
+        let unwrapAmount: BN | null = null;
+        let wrapAmount: BN | null = null;
+        for (let a = 3; a < 100_000; a++) {
+          const u = new BN(a);
+          const w = new BN(a - 1);
+          const oldBurnU = $.amountToPrincipalDown(u, extIndex);
+          const oldMintW = $.amountToPrincipalDown(w, extIndex);
+          const releaseU = $.amountToPrincipalDown(u, mIndex);
+          const payW = $.amountToPrincipalDown(w, mIndex);
+          if (
+            oldBurnU.eq(oldMintW) &&
+            releaseU.gt(payW) &&
+            payW.gtn(0) &&
+            oldBurnU.gtn(0)
+          ) {
+            unwrapAmount = u;
+            wrapAmount = w;
+            break;
+          }
+        }
+        expect(unwrapAmount).not.toBeNull();
+
+        // Give the attacker an ext position to cycle
+        await $.wrap($.wrapAuthority, new BN(10_000_000));
+        $.svm.expireBlockhash();
+
+        const vaultAta = await $.getATA($.mMint.publicKey, $.getMVault());
+        const startVault = await $.getTokenBalance(vaultAta);
+        const startSupply = await $.getExtTokenSupplyRaw();
+
+        for (let i = 0; i < 50; i++) {
+          await $.unwrap($.wrapAuthority, unwrapAmount!);
+          $.svm.expireBlockhash();
+          await $.wrap($.wrapAuthority, wrapAmount!);
+          $.svm.expireBlockhash();
+        }
+
+        // The vault must not lose more value than the liability it shed
+        const endVault = await $.getTokenBalance(vaultAta);
+        const endSupply = await $.getExtTokenSupplyRaw();
+        expect(
+          endVault
+            .sub(startVault)
+            .mul(mIndex)
+            .gte(endSupply.sub(startSupply).mul(extIndex)),
+        ).toBe(true);
+        await $.expectExtSolventRaw();
+      });
+
+      // Wrap-side mirror: small wraps minted ext worth more than the M received; one unwrap realized it
+      test("many small wraps then one unwrap does not drain the vault", async () => {
+        const mIndex = await $.getCurrentMIndex();
+        const extIndex = await $.getEffectiveExtIndex();
+
+        let wrapAmount: BN | null = null;
+        for (let a = 2; a < 10_000; a++) {
+          const w = new BN(a);
+          const payW = $.amountToPrincipalDown(w, mIndex);
+          const oldMintW = $.amountToPrincipalDown(w, extIndex);
+          if (payW.gtn(0) && oldMintW.mul(extIndex).gt(payW.mul(mIndex))) {
+            wrapAmount = w;
+            break;
+          }
+        }
+        expect(wrapAmount).not.toBeNull();
+
+        const vaultAta = await $.getATA($.mMint.publicKey, $.getMVault());
+        const startVault = await $.getTokenBalance(vaultAta);
+        const startSupply = await $.getExtTokenSupplyRaw();
+
+        for (let i = 0; i < 30; i++) {
+          await $.wrap($.wrapAuthority, wrapAmount!);
+          $.svm.expireBlockhash();
+        }
+
+        // Unwrap the attacker's full redeemable balance in one call
+        const extAta = await $.getATA(
+          $.extMint.publicKey,
+          $.wrapAuthority.publicKey,
+          $.useToken2022ForExt,
+        );
+        const extBalance = await $.getTokenBalance(extAta, $.useToken2022ForExt);
+        const redeemable = $.principalToAmountDown(extBalance, extIndex);
+        await $.unwrap($.wrapAuthority, redeemable);
+
+        // The vault must not lose more value than the liability it shed
+        const endVault = await $.getTokenBalance(vaultAta);
+        const endSupply = await $.getExtTokenSupplyRaw();
+        expect(
+          endVault
+            .sub(startVault)
+            .mul(mIndex)
+            .gte(endSupply.sub(startSupply).mul(extIndex)),
+        ).toBe(true);
+        await $.expectExtSolventRaw();
       });
     });
 

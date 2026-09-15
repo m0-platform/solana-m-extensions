@@ -5,7 +5,9 @@ use crate::{
     errors::ExtError,
     state::{ExtGlobalV2, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED, M_VAULT_SEED},
     utils::{
-        conversion::{amount_to_principal_down, multiplier_to_index, sync_index},
+        conversion::{
+            amount_to_principal_down, convert_principal_down, multiplier_to_index, sync_index,
+        },
         token::{mint_tokens, transfer_tokens},
     },
 };
@@ -121,11 +123,8 @@ impl Wrap<'_> {
         let m_index = multiplier_to_index(m_scaled_ui_config.new_multiplier.into())?;
         let m_principal = amount_to_principal_down(amount, m_index)?;
 
-        // Calculate the principal amount of ext tokens to mint
-        // based on the amount of m input
-        // For extension tokens that do not use scaled ui, this will be a 1:1 conversion
-        // For scaled ui extensions, it rounds down slightly, but yield accrual will make up any difference
-        let ext_principal = amount_to_principal_down(amount, ext_index)?;
+        // Mint ext derived from the M principal received so its value never exceeds it (Immunefi #92952)
+        let ext_principal = convert_principal_down(m_principal, m_index, ext_index)?;
 
         // Confirm principal amounts are not zero
         require_gt!(m_principal, 0, ExtError::InvalidAmount);

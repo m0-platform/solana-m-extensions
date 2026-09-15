@@ -1341,24 +1341,35 @@ export class ExtensionTest<
   }
 
   /**
-   * Calculate the expected principals from a UI amount for wrap/unwrap operations.
-   * This mirrors the Rust amount_to_principal_down calculation.
-   *
-   * @param uiAmount - The UI amount being wrapped/unwrapped
-   * @returns Object with mPrincipal and extPrincipal
+   * Expected wrap principals: M principal floored from the amount, ext
+   * principal derived from that M principal (mirrors the Rust wrap handler).
    */
   public async getExpectedWrapPrincipals(uiAmount: BN): Promise<{
     mPrincipal: BN;
     extPrincipal: BN;
   }> {
-    const INDEX_SCALE = new BN("1000000000000"); // 1e12
-
     const mIndex = await this.getCurrentMIndex();
     const extIndex = await this.getCurrentExtIndex();
 
-    // amount_to_principal_down: principal = (amount * INDEX_SCALE) / index
-    const mPrincipal = uiAmount.mul(INDEX_SCALE).div(mIndex);
-    const extPrincipal = uiAmount.mul(INDEX_SCALE).div(extIndex);
+    const mPrincipal = this.amountToPrincipalDown(uiAmount, mIndex);
+    const extPrincipal = this.convertPrincipalDown(mPrincipal, mIndex, extIndex);
+
+    return { mPrincipal, extPrincipal };
+  }
+
+  /**
+   * Expected unwrap principals: ext principal (the burn) rounded up from the
+   * amount, M principal floored from it (mirrors the Rust unwrap handler).
+   */
+  public async getExpectedUnwrapPrincipals(uiAmount: BN): Promise<{
+    mPrincipal: BN;
+    extPrincipal: BN;
+  }> {
+    const mIndex = await this.getCurrentMIndex();
+    const extIndex = await this.getCurrentExtIndex();
+
+    const mPrincipal = this.amountToPrincipalDown(uiAmount, mIndex);
+    const extPrincipal = this.amountToPrincipalUp(uiAmount, extIndex);
 
     return { mPrincipal, extPrincipal };
   }
@@ -1373,6 +1384,29 @@ export class ExtensionTest<
       return amount;
     }
     return amount.mul(INDEX_SCALE).div(index);
+  }
+
+  /**
+   * Calculate expected principal from UI amount for a specific index.
+   * Mirrors Rust amount_to_principal_up.
+   */
+  public amountToPrincipalUp(amount: BN, index: BN): BN {
+    const INDEX_SCALE = new BN("1000000000000"); // 1e12
+    if (index.eq(INDEX_SCALE)) {
+      return amount;
+    }
+    return amount.mul(INDEX_SCALE).add(index.subn(1)).div(index);
+  }
+
+  /**
+   * Convert a principal from one index basis to another, rounding down.
+   * Mirrors Rust convert_principal_down.
+   */
+  public convertPrincipalDown(principal: BN, fromIndex: BN, toIndex: BN): BN {
+    if (fromIndex.eq(toIndex)) {
+      return principal;
+    }
+    return principal.mul(fromIndex).div(toIndex);
   }
 
   /**
@@ -1573,6 +1607,46 @@ export class ExtensionTest<
       : expect(BigInt(mVaultUiBalance.toString())).toBeGreaterThanOrEqual(
           BigInt(extSupply.toString())
         );
+  }
+
+  /**
+   * The ext index actually used by the wrap/unwrap handlers:
+   * the synced ext index for ScaledUi, 1.0 for every other variant
+   * (sync_index returns INDEX_SCALE when the scaled-ui feature is off).
+   */
+  public async getEffectiveExtIndex(): Promise<BN> {
+    return this.variant === Variant.ScaledUi
+      ? await this.getCurrentExtIndex()
+      : new BN(1e12);
+  }
+
+  public async getExtTokenSupplyRaw(): Promise<BN> {
+    const mintInfo = await getMint(
+      this.provider.connection,
+      this.extMint.publicKey,
+      undefined,
+      this.useToken2022ForExt ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+    );
+    if (!mintInfo) {
+      throw new Error("Mint not found");
+    }
+    return new BN(mintInfo.supply.toString());
+  }
+
+  /**
+   * Strict solvency check in raw value terms with no rounding tolerance:
+   * vault_m_raw * m_index >= ext_supply_raw * ext_index.
+   * Immunefi #92952 broke this invariant; PROTO-1030 fixes it.
+   */
+  public async expectExtSolventRaw() {
+    const supplyRaw = await this.getExtTokenSupplyRaw();
+    const vaultRaw = await this.getTokenBalance(
+      await this.getATA(this.mMint.publicKey, this.getMVault())
+    );
+    const mIndex = await this.getCurrentMIndex();
+    const extIndex = await this.getEffectiveExtIndex();
+
+    expect(vaultRaw.mul(mIndex).gte(supplyRaw.mul(extIndex))).toBe(true);
   }
 
   // Helper functions for executing MExt instructions
