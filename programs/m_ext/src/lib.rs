@@ -98,6 +98,16 @@ pub mod m_ext {
         ClaimFees::handler(ctx)
     }
 
+    #[cfg(any(feature = "scaled-ui", feature = "no-yield"))]
+    pub fn set_claim_config(ctx: Context<SetClaimConfig>, claim_authority: Pubkey) -> Result<()> {
+        SetClaimConfig::handler(ctx, claim_authority)
+    }
+
+    #[cfg(any(feature = "scaled-ui", feature = "no-yield"))]
+    pub fn remove_claim_config(ctx: Context<RemoveClaimConfig>) -> Result<()> {
+        RemoveClaimConfig::handler(ctx)
+    }
+
     pub fn transfer_admin(ctx: Context<TransferAdmin>, new_admin: Pubkey) -> Result<()> {
         TransferAdmin::handler(ctx, new_admin)
     }
