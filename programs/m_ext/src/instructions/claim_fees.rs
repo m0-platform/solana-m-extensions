@@ -8,7 +8,10 @@ use anchor_spl::{
 // local dependencies
 use crate::{
     errors::ExtError,
-    state::{ExtGlobalV2, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED, M_VAULT_SEED},
+    state::{
+        ClaimConfig, ExtGlobalV2, CLAIM_CONFIG_SEED, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED,
+        M_VAULT_SEED,
+    },
     utils::{
         conversion::{
             amount_to_principal_down, multiplier_to_index, principal_to_amount_down,
@@ -75,6 +78,81 @@ pub struct ClaimFees<'info> {
 }
 
 impl ClaimFees<'_> {
+    pub fn handler(ctx: Context<Self>) -> Result<()> {
+        let accounts = ctx.accounts;
+        claim_excess(
+            &mut accounts.global_account,
+            &accounts.m_mint,
+            &mut accounts.ext_mint,
+            &accounts.ext_mint_authority,
+            &accounts.vault_m_token_account,
+            &accounts.recipient_ext_token_account,
+            &accounts.ext_token_program,
+        )
+    }
+}
+
+#[derive(Accounts)]
+pub struct ClaimFeesDelegated<'info> {
+    pub claim_authority: Signer<'info>,
+
+    #[account(
+        seeds = [CLAIM_CONFIG_SEED],
+        has_one = claim_authority @ ExtError::NotAuthorized,
+        bump = claim_config.bump,
+    )]
+    pub claim_config: Account<'info, ClaimConfig>,
+
+    #[account(
+        mut,
+        seeds = [EXT_GLOBAL_SEED],
+        has_one = m_mint @ ExtError::InvalidMint,
+        has_one = ext_mint @ ExtError::InvalidMint,
+        bump = global_account.bump,
+    )]
+    pub global_account: Account<'info, ExtGlobalV2>,
+
+    #[account(mint::token_program = m_token_program)]
+    pub m_mint: InterfaceAccount<'info, Mint>,
+
+    #[account(mut, mint::token_program = ext_token_program)]
+    pub ext_mint: InterfaceAccount<'info, Mint>,
+
+    /// CHECK: This account is validated by the seed, it stores no data
+    #[account(
+        seeds = [MINT_AUTHORITY_SEED],
+        bump = global_account.ext_mint_authority_bump,
+    )]
+    pub ext_mint_authority: AccountInfo<'info>,
+
+    /// CHECK: There is no data in this account, it is validated by the seed
+    #[account(
+        seeds = [M_VAULT_SEED],
+        bump = global_account.m_vault_bump,
+    )]
+    pub m_vault: AccountInfo<'info>,
+
+    #[account(
+        mut,
+        associated_token::mint = m_mint,
+        associated_token::authority = m_vault,
+        associated_token::token_program = m_token_program,
+    )]
+    pub vault_m_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        address = claim_config.recipient_token_account @ ExtError::InvalidAccount,
+        token::mint = ext_mint,
+        token::token_program = ext_token_program,
+    )]
+    pub recipient_ext_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    pub m_token_program: Program<'info, Token2022>,
+    pub ext_token_program: Interface<'info, TokenInterface>,
+}
+
+impl ClaimFeesDelegated<'_> {
     pub fn handler(ctx: Context<Self>) -> Result<()> {
         let accounts = ctx.accounts;
         claim_excess(

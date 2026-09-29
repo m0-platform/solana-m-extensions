@@ -157,6 +157,12 @@ pub mod m_ext {
         Unwrap::handler(ctx, amount)
     }
 
+    // Claim authority instructions
+    #[cfg(any(feature = "scaled-ui", feature = "no-yield"))]
+    pub fn claim_fees_delegated(ctx: Context<ClaimFeesDelegated>) -> Result<()> {
+        ClaimFeesDelegated::handler(ctx)
+    }
+
     // Sync
     #[cfg(any(feature = "scaled-ui", feature = "crank"))]
     pub fn sync(ctx: Context<Sync>) -> Result<()> {
