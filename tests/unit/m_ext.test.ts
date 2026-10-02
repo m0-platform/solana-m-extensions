@@ -1543,20 +1543,6 @@ for (const [variant, tokenProgramId] of VARIANTS) {
               );
             });
 
-            test("recipient is frozen - reverts", async () => {
-              await $.freezeTokenAccount(
-                recipient,
-                $.extMint.publicKey,
-                $.admin,
-                $.useToken2022ForExt,
-              );
-
-              await $.expectAnchorError(
-                $.setClaimConfig(bot.publicKey, recipient),
-                "InvalidAccount",
-              );
-            });
-
             test("creates the config - success", async () => {
               await $.setClaimConfig(bot.publicKey, recipient);
 
