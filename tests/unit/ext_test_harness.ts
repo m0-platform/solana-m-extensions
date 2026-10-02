@@ -1837,6 +1837,54 @@ export class ExtensionTest<
     return { recipientExtTokenAccount };
   }
 
+  public getClaimConfigAccount(): PublicKey {
+    const [claimConfig] = PublicKey.findProgramAddressSync(
+      [Buffer.from("claim_config")],
+      this.ext.programId
+    );
+
+    return claimConfig;
+  }
+
+  public setClaimConfig(
+    claimAuthority: PublicKey,
+    recipientTokenAccount: PublicKey,
+    admin: Keypair = this.admin
+  ) {
+    return this.ext.methods
+      .setClaimConfig(claimAuthority)
+      .accountsPartial({
+        admin: admin.publicKey,
+        recipientTokenAccount,
+        extTokenProgram: this.extTokenProgram,
+      })
+      .signers([admin])
+      .rpc();
+  }
+
+  public removeClaimConfig(admin: Keypair = this.admin) {
+    return this.ext.methods
+      .removeClaimConfig()
+      .accountsPartial({ admin: admin.publicKey })
+      .signers([admin])
+      .rpc();
+  }
+
+  public claimFeesDelegated(
+    claimAuthority: Keypair,
+    recipientExtTokenAccount: PublicKey
+  ) {
+    return this.ext.methods
+      .claimFeesDelegated()
+      .accountsPartial({
+        claimAuthority: claimAuthority.publicKey,
+        recipientExtTokenAccount,
+        extTokenProgram: this.extTokenProgram,
+      })
+      .signers([claimAuthority])
+      .rpc();
+  }
+
   // Helper functions for Crank variant functionality
 
   public getEarnManagerAccount(earnManager: PublicKey): PublicKey {

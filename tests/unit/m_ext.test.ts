@@ -1481,6 +1481,279 @@ for (const [variant, tokenProgramId] of VARIANTS) {
         });
       }
 
+      if (variant !== Variant.Crank) {
+        describe("delegated claim unit tests", () => {
+          const initialWrappedAmount = new BN(10_000_000);
+          const feeBps = new BN(randomInt(1, 10000));
+          const startIndex = new BN(
+            randomInt(initialIndex.toNumber() + 1, 2e12),
+          );
+          let bot: Keypair;
+          let recipient: PublicKey;
+
+          const balanceOf = (tokenAccount: PublicKey) =>
+            $.getTokenBalance(tokenAccount, $.useToken2022ForExt);
+
+          const ataOf = (owner: PublicKey) =>
+            $.getATA($.extMint.publicKey, owner, $.useToken2022ForExt);
+
+          beforeEach(async () => {
+            await $.initializeExt(
+              [$.admin.publicKey, $.wrapAuthority.publicKey],
+              feeBps,
+            );
+            await $.wrap($.admin, initialWrappedAmount);
+            await $.propagateIndex(startIndex);
+            if (variant === Variant.ScaledUi) {
+              await $.sync();
+            }
+
+            bot = new Keypair();
+            $.svm.airdrop(bot.publicKey, BigInt(LAMPORTS_PER_SOL));
+            recipient = await ataOf($.nonAdmin.publicKey);
+            $.svm.expireBlockhash();
+          });
+
+          describe("set_claim_config unit tests", () => {
+            test("admin does not sign - reverts", async () => {
+              await $.expectAnchorError(
+                $.setClaimConfig(bot.publicKey, recipient, $.nonAdmin),
+                "NotAuthorized",
+              );
+            });
+
+            test("recipient is not an ext token account - reverts", async () => {
+              const otherMint = new Keypair();
+              await $.createMint(
+                otherMint,
+                $.admin.publicKey,
+                null,
+                $.useToken2022ForExt,
+                6,
+              );
+              const otherTokenAccount = await $.getATA(
+                otherMint.publicKey,
+                $.nonAdmin.publicKey,
+                $.useToken2022ForExt,
+              );
+
+              await $.expectAnchorError(
+                $.setClaimConfig(bot.publicKey, otherTokenAccount),
+                "ConstraintTokenMint",
+              );
+            });
+
+            test("creates the config - success", async () => {
+              await $.setClaimConfig(bot.publicKey, recipient);
+
+              const config = await $.ext.account.claimConfig.fetch(
+                $.getClaimConfigAccount(),
+              );
+              expect(config.claimAuthority).toEqual(bot.publicKey);
+              expect(config.recipientTokenAccount).toEqual(recipient);
+            });
+
+            test("overwrites both fields - success", async () => {
+              await $.setClaimConfig(bot.publicKey, recipient);
+              const newBot = Keypair.generate().publicKey;
+              const newRecipient = await ataOf($.admin.publicKey);
+
+              await $.setClaimConfig(newBot, newRecipient);
+
+              const config = await $.ext.account.claimConfig.fetch(
+                $.getClaimConfigAccount(),
+              );
+              expect(config.claimAuthority).toEqual(newBot);
+              expect(config.recipientTokenAccount).toEqual(newRecipient);
+            });
+          });
+
+          describe("remove_claim_config unit tests", () => {
+            beforeEach(async () => {
+              await $.setClaimConfig(bot.publicKey, recipient);
+              $.svm.expireBlockhash();
+            });
+
+            test("admin does not sign - reverts", async () => {
+              await $.expectAnchorError(
+                $.removeClaimConfig($.nonAdmin),
+                "NotAuthorized",
+              );
+            });
+
+            test("closes the config and refunds the admin - success", async () => {
+              const before = $.svm.getBalance($.admin.publicKey)!;
+
+              await $.removeClaimConfig();
+
+              $.expectAccountEmpty($.getClaimConfigAccount());
+              expect($.svm.getBalance($.admin.publicKey)! > before).toBe(true);
+            });
+
+            test("recreates the config after removal - success", async () => {
+              await $.removeClaimConfig();
+
+              await $.setClaimConfig(bot.publicKey, recipient);
+
+              const config = await $.ext.account.claimConfig.fetch(
+                $.getClaimConfigAccount(),
+              );
+              expect(config.claimAuthority).toEqual(bot.publicKey);
+            });
+          });
+
+          describe("claim_fees_delegated unit tests", () => {
+            test("no config - reverts", async () => {
+              await $.expectAnchorError(
+                $.claimFeesDelegated(bot, recipient),
+                "AccountNotInitialized",
+              );
+            });
+
+            describe("with config", () => {
+              beforeEach(async () => {
+                await $.setClaimConfig(bot.publicKey, recipient);
+                $.svm.expireBlockhash();
+              });
+
+              test("claim authority claims all excess - success", async () => {
+                const before = await balanceOf(recipient);
+
+                await $.claimFeesDelegated(bot, recipient);
+
+                const after = await balanceOf(recipient);
+                expect(after.gt(before)).toBe(true);
+
+                const adminATA = await ataOf($.admin.publicKey);
+                const adminBefore = await balanceOf(adminATA);
+                await $.claimFees(adminATA);
+                expect((await balanceOf(adminATA)).eq(adminBefore)).toBe(true);
+              });
+
+              test("repeat claim at the same index mints nothing - success", async () => {
+                await $.claimFeesDelegated(bot, recipient);
+                $.svm.expireBlockhash();
+                const before = await balanceOf(recipient);
+
+                await $.claimFeesDelegated(bot, recipient);
+
+                expect((await balanceOf(recipient)).eq(before)).toBe(true);
+              });
+
+              test("signer is not the claim authority - reverts", async () => {
+                await $.expectAnchorError(
+                  $.claimFeesDelegated($.nonAdmin, recipient),
+                  "NotAuthorized",
+                );
+              });
+
+              test("admin is not the claim authority - reverts", async () => {
+                await $.expectAnchorError(
+                  $.claimFeesDelegated($.admin, recipient),
+                  "NotAuthorized",
+                );
+              });
+
+              test("rotated authority - old reverts, new succeeds", async () => {
+                const newBot = new Keypair();
+                $.svm.airdrop(newBot.publicKey, BigInt(LAMPORTS_PER_SOL));
+                await $.setClaimConfig(newBot.publicKey, recipient);
+
+                await $.expectAnchorError(
+                  $.claimFeesDelegated(bot, recipient),
+                  "NotAuthorized",
+                );
+                await $.claimFeesDelegated(newBot, recipient);
+              });
+
+              test("config removed - reverts", async () => {
+                await $.removeClaimConfig();
+
+                await $.expectAnchorError(
+                  $.claimFeesDelegated(bot, recipient),
+                  "AccountNotInitialized",
+                );
+              });
+
+              test("recipient is not the configured one - reverts", async () => {
+                await $.expectAnchorError(
+                  $.claimFeesDelegated(bot, await ataOf(bot.publicKey)),
+                  "InvalidAccount",
+                );
+              });
+
+              test("recipient is not an ext token account - reverts", async () => {
+                const mTokenAccount = await $.getATA(
+                  $.mMint.publicKey,
+                  $.nonAdmin.publicKey,
+                );
+
+                await $.expectAnchorError(
+                  $.claimFeesDelegated(bot, mTokenAccount),
+                  "InvalidAccount",
+                );
+              });
+
+              test("recipient changed - old reverts, new succeeds", async () => {
+                const newRecipient = await ataOf($.admin.publicKey);
+                await $.setClaimConfig(bot.publicKey, newRecipient);
+
+                await $.expectAnchorError(
+                  $.claimFeesDelegated(bot, recipient),
+                  "InvalidAccount",
+                );
+                const before = await balanceOf(newRecipient);
+                await $.claimFeesDelegated(bot, newRecipient);
+                expect((await balanceOf(newRecipient)).gt(before)).toBe(true);
+              });
+
+              test("recipient frozen after setup - reverts", async () => {
+                await $.freezeTokenAccount(
+                  recipient,
+                  $.extMint.publicKey,
+                  $.admin,
+                  $.useToken2022ForExt,
+                );
+
+                await $.expectSystemError($.claimFeesDelegated(bot, recipient));
+              });
+
+              test("vault m token account is frozen - reverts", async () => {
+                await $.removeMEarner($.getMVault());
+
+                await $.expectAnchorError(
+                  $.claimFeesDelegated(bot, recipient),
+                  "VaultFrozen",
+                );
+              });
+
+              test("admin claim_fees still pays any recipient - success", async () => {
+                const other = await ataOf(bot.publicKey);
+                const before = await balanceOf(other);
+
+                await $.claimFees(other);
+
+                expect((await balanceOf(other)).gt(before)).toBe(true);
+              });
+
+              test("config survives admin transfer, only new admin can change it", async () => {
+                const newAdmin = new Keypair();
+                $.svm.airdrop(newAdmin.publicKey, BigInt(LAMPORTS_PER_SOL));
+                await $.transferAdmin(newAdmin.publicKey);
+                await $.acceptAdmin(newAdmin);
+
+                await $.claimFeesDelegated(bot, recipient);
+                await $.expectAnchorError(
+                  $.setClaimConfig(bot.publicKey, recipient),
+                  "NotAuthorized",
+                );
+                await $.setClaimConfig(bot.publicKey, recipient, newAdmin);
+              });
+            });
+          });
+        });
+      }
+
       if (variant === Variant.ScaledUi) {
         describe("set_fee unit tests", () => {
           // yield variant test cases
