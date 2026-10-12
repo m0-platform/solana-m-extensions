@@ -86,7 +86,7 @@ const mints: { [key: string]: string } = {
   extUkDFf3HLekkxbcZ3XRUizMjbxMJgKBay3p9xGVmg:
     "usdsfJbX78ktZUnoRC7dwvvQz7xH3WdkpGne76gdUia",
   mextzNVPUbLbvyBwqBqnC5J1SSwjDLjjR4yppf6EBzc:
-    "dawn7ZUF7h7anFuEsDdAU1Y3HYwikwqNMAENZsQJdNL"
+    "dawn7ZUF7h7anFuEsDdAU1Y3HYwikwqNMAENZsQJdNL",
 };
 
 const M_MINT = new PublicKey("mzerojk9tg56ebsrEAhfkyc9VgKjTW2zDqp6C5mhjzH");

@@ -62,30 +62,42 @@ const opts: shell.ExecOptions & { async: false } = {
 
   program
     .command("set-idl")
-    .requiredOption("-t, --type <type>", "Yield type") // e.g. scaled-ui
-    .requiredOption("-e, --extension <name>", "Extension program ID") // e.g. USDKy
+    .option("-t, --type <type>", "Yield type") // e.g. scaled-ui
+    .option("-e, --extension <name>", "Extension program ID") // e.g. USDKy
     .option("--skip-build", "Skip building the program", false) // if deployment was done immediately before, rebuilding is not required.
     .option("-i, --init", "Upload IDL for the first time", false) // indicates if the data account to store the IDL is created in this transaction.
     .option("-s, --swapProgram", "Update swap program", false)
     .action(({ type, extension, skipBuild, init, swapProgram }) => {
-      const [pid] = keysFromEnv([extension]);
-      const pubkey = swapProgram ? EXT_SWAP_PID : pid.publicKey.toBase58();
+      // swap program does not use --type or --extension
+      if (!swapProgram && !extension) {
+        program.error(
+          "error: option '-e, --extension <name>' is required unless --swapProgram is set",
+        );
+      }
+      if (!swapProgram && !skipBuild && !type) {
+        program.error(
+          "error: option '-t, --type <type>' is required unless --skip-build or --swapProgram is set",
+        );
+      }
+
+      const pubkey = swapProgram
+        ? EXT_SWAP_PID
+        : keysFromEnv([extension])[0].publicKey.toBase58();
 
       if (!skipBuild) {
-        console.log(`Building IDL for extension ${pubkey}`);
+        console.log(`Building IDL for ${pubkey}`);
         buildProgram(pubkey, type, false, swapProgram);
       }
 
-      console.log(`Uploading IDL for extension ${pubkey}`);
+      console.log(`Uploading IDL for ${pubkey}`);
 
       if (swapProgram) {
         postSwapIDL();
-        return;
+      } else {
+        postIDL(pubkey, init);
       }
 
-      postIDL(pubkey, init);
-
-      console.log("IDL successfully uploaded")
+      console.log("IDL successfully uploaded");
     });
 
   program
@@ -537,7 +549,7 @@ function updateProgram(
 }
 
 function postIDL(pid: string, init = false) {
-  shell.exec(
+  const result = shell.exec(
     `anchor idl ${init ? "init" : "upgrade"} \
       -f target/idl/m_ext.json \
       --provider.cluster ${process.env.RPC_URL} \
@@ -545,10 +557,13 @@ function postIDL(pid: string, init = false) {
       ${pid}`,
     opts,
   );
+  if (result.code !== 0) {
+    throw new Error(`IDL upload failed: ${result.stderr}`);
+  }
 }
 
 function postSwapIDL() {
-  shell.exec(
+  const result = shell.exec(
     `anchor idl upgrade \
       -f target/idl/ext_swap.json \
       --provider.cluster ${process.env.RPC_URL} \
@@ -556,6 +571,9 @@ function postSwapIDL() {
       MSwapi3WhNKMUGm9YrxGhypgUEt7wYQH3ZgG32XoWzH`,
     opts,
   );
+  if (result.code !== 0) {
+    throw new Error(`Swap IDL upload failed: ${result.stderr}`);
+  }
 }
 
 function verifyPdaTransaction(
@@ -595,7 +613,7 @@ function keysFromEnv(keys: string[]) {
       process.exit(1);
     }
 
-    return Keypair.fromSecretKey(Buffer.from(JSON.parse(val)))
+    return Keypair.fromSecretKey(Buffer.from(JSON.parse(val)));
   });
 
   return foundKeys;
