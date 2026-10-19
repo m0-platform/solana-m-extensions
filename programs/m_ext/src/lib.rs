@@ -44,6 +44,12 @@ const _: () = {
             "Invalid feature configuration: 'migrate' and 'crank' cannot be enabled without 'wm'"
         );
     }
+
+    // The V2 gateway handoff supports no-yield builds only; a scaled-ui
+    // handoff must also move the ScaledUiAmount config authority.
+    if cfg!(feature = "handoff") && !cfg!(feature = "no-yield") {
+        panic!("Invalid feature configuration: 'handoff' requires 'no-yield'");
+    }
 };
 
 #[program]
@@ -135,6 +141,11 @@ pub mod m_ext {
     #[cfg(feature = "migrate")]
     pub fn migrate_m(ctx: Context<MigrateM>) -> Result<()> {
         MigrateM::handler(ctx)
+    }
+
+    #[cfg(feature = "handoff")]
+    pub fn handoff(ctx: Context<Handoff>, gateway_program: Pubkey) -> Result<()> {
+        Handoff::handler(ctx, gateway_program)
     }
 
     // Wrap authority instructions

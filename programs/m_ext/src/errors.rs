@@ -34,4 +34,6 @@ pub enum ExtError {
     InvalidTokenProgram,
     #[msg("Vault token account frozen.")]
     VaultFrozen,
+    #[msg("Freeze authority is held by this program and can never move.")]
+    FreezeAuthorityUnreachable,
 }

@@ -29,3 +29,12 @@ cfg_if::cfg_if!(
         pub use migrate::*;
     }
 );
+
+// Only add the handoff instruction when migrating an extension onto an M0 V2
+// Issuer Gateway deployment
+cfg_if::cfg_if!(
+    if #[cfg(feature = "handoff")] {
+        pub mod handoff;
+        pub use handoff::*;
+    }
+);

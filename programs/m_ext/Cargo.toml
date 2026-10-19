@@ -13,7 +13,7 @@ no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 cpi = ["no-entrypoint"]
-default = ["no-yield"]
+default = ["no-yield", "handoff"]
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 # yield features
@@ -23,6 +23,8 @@ crank = []
 
 # Migration feature flag
 migrate = []
+# V2 gateway handoff
+handoff = []
 wm = ["crank", "migrate"]
 
 [dependencies]
