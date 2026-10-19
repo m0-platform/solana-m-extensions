@@ -1,6 +1,10 @@
 use anchor_lang::prelude::*;
 use cfg_if::cfg_if;
 
+pub mod claim_config;
+
+pub use claim_config::*;
+
 #[constant]
 pub const EXT_GLOBAL_SEED: &[u8] = b"global";
 
