@@ -1248,11 +1248,29 @@ export class ExtensionTest<
       await this.ext.account.extGlobalV2.fetch(this.getExtGlobalAccount())
     ).yieldConfig;
 
-    return (
-      (yieldConfig.lastExtIndex!.toNumber() / 1e12) *
-      (newIndex.toNumber() / yieldConfig.lastMIndex!.toNumber()) **
-        (1 - yieldConfig.feeBps!.toNumber() / 1e4)
-    );
+    const lastExtIndex = yieldConfig.lastExtIndex!;
+    const lastMIndex = yieldConfig.lastMIndex!;
+    const feeBps = yieldConfig.feeBps!.toNumber();
+    const indexScale = new BN(1e12);
+
+    // Mirror calculate_new_index in programs/m_ext/src/utils/conversion.rs
+    // exactly, including its integer-truncating division steps, so the
+    // expected value matches the on-chain result instead of relying on a
+    // float tolerance to absorb the truncation.
+    const mIncreaseFactor = newIndex.mul(indexScale).div(lastMIndex);
+
+    const extIncreaseFactor =
+      feeBps === 0
+        ? mIncreaseFactor.toNumber()
+        : Math.floor(
+            (mIncreaseFactor.toNumber() / 1e12) ** (1 - feeBps / 1e4) * 1e12,
+          );
+
+    const newExtIndex = lastExtIndex
+      .mul(new BN(extIncreaseFactor))
+      .div(indexScale);
+
+    return newExtIndex.toNumber() / 1e12;
   }
 
   public async getCurrentMultiplier(): Promise<number> {
