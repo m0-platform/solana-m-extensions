@@ -1,0 +1,4 @@
+# Test default for the handoff gateway id. Real issuer builds override it:
+# GATEWAY_PROGRAM_ID=<issuer gateway id> anchor build -p m_ext -- --features no-yield,handoff --no-default-features
+[env]
+GATEWAY_PROGRAM_ID = { value = "EDKMBb8e1DyCZtUrczZeJgxWgMU2nLBCuK31XzPnXWu3", force = false }

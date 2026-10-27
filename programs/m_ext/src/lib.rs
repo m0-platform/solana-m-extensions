@@ -144,8 +144,8 @@ pub mod m_ext {
     }
 
     #[cfg(feature = "handoff")]
-    pub fn handoff(ctx: Context<Handoff>, gateway_program: Pubkey) -> Result<()> {
-        Handoff::handler(ctx, gateway_program)
+    pub fn handoff(ctx: Context<Handoff>) -> Result<()> {
+        Handoff::handler(ctx)
     }
 
     // Wrap authority instructions

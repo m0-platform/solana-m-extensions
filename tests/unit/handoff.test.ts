@@ -12,7 +12,7 @@
 //   [X] wrap and unwrap are dead afterwards
 // [X] given a non-admin signer                          it reverts with NotAuthorized
 // [X] given vault M below the ext supply                it reverts with InsufficientCollateral
-// [X] given a target that is not the derived PDA        it reverts with InvalidAccount
+// [X] given a target that is not the derived PDA        it reverts with ConstraintSeeds
 // [X] given a target not owned by the gateway program   it reverts with InvalidAccount
 // [X] given a target not in AdoptionPending             it reverts with InvalidAccount
 // [X] given a second call after a successful handoff    it reverts
@@ -41,9 +41,14 @@ const MINT_ORIGIN_OFFSET = 5;
 const MINT_ORIGIN_ADOPTION_PENDING = 1;
 const MINT_OFFSET = 10;
 
+// The gateway id the test binary pins, the `GATEWAY_PROGRAM_ID` default in
+// .cargo/config.toml.
+const gatewayProgram = new PublicKey(
+  "EDKMBb8e1DyCZtUrczZeJgxWgMU2nLBCuK31XzPnXWu3"
+);
+
 describe("handoff unit tests", () => {
   let $: ExtensionTest<Variant.NoYield>;
-  let gatewayProgram: PublicKey;
   let vaultMTokenAccount: PublicKey;
   let treasury: Keypair;
   let treasuryMTokenAccount: PublicKey;
@@ -77,7 +82,7 @@ describe("handoff unit tests", () => {
 
   const handoff = (stablecoin: PublicKey, signer?: Keypair) =>
     $.ext.methods
-      .handoff(gatewayProgram)
+      .handoff()
       .accountsPartial({
         admin: (signer ?? $.admin).publicKey,
         globalAccount: $.getExtGlobalAccount(),
@@ -98,7 +103,6 @@ describe("handoff unit tests", () => {
     await $.init(initialSupply, initialIndex);
     await $.initializeExt([$.admin.publicKey, $.wrapAuthority.publicKey]);
 
-    gatewayProgram = Keypair.generate().publicKey;
     vaultMTokenAccount = await $.getATA($.mMint.publicKey, $.getMVault());
 
     // The treasury holds a thawed $M account (M accounts thaw via earner status).
@@ -165,7 +169,7 @@ describe("handoff unit tests", () => {
     const elsewhere = plantStablecoin({
       address: Keypair.generate().publicKey,
     });
-    await $.expectAnchorError(handoff(elsewhere), "InvalidAccount");
+    await $.expectAnchorError(handoff(elsewhere), "ConstraintSeeds");
   });
 
   test("target not owned by the gateway program - reverts", async () => {

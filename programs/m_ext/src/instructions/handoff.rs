@@ -36,6 +36,11 @@ const MINT_ORIGIN_OFFSET: usize = 5;
 const MINT_ORIGIN_ADOPTION_PENDING: u8 = 1;
 const MINT_OFFSET: usize = 10;
 
+// The issuer's gateway program id, fixed at build time (`GATEWAY_PROGRAM_ID`).
+// Each issuer deploys its own gateway, so the id is pinned per upgrade binary
+// instead of being accepted from the admin.
+const GATEWAY_PROGRAM_ID: Pubkey = Pubkey::from_str_const(env!("GATEWAY_PROGRAM_ID"));
+
 #[derive(Accounts)]
 pub struct Handoff<'info> {
     #[account(mut)]
@@ -61,8 +66,14 @@ pub struct Handoff<'info> {
     )]
     pub ext_mint_authority: AccountInfo<'info>,
 
-    /// CHECK: Validated in the instruction — the gateway `Stablecoin` PDA
-    /// derived from the `gateway_program` argument, never a raw address.
+    /// CHECK: The gateway `Stablecoin` PDA under the pinned gateway id, never
+    /// a raw address. Its bytes are verified in `validate`.
+    #[account(
+        owner = GATEWAY_PROGRAM_ID @ ExtError::InvalidAccount,
+        seeds = [STABLECOIN_SEED, ext_mint.key().as_ref()],
+        seeds::program = GATEWAY_PROGRAM_ID,
+        bump,
+    )]
     pub stablecoin: AccountInfo<'info>,
 
     #[account(mint::token_program = m_token_program)]
@@ -95,7 +106,7 @@ pub struct Handoff<'info> {
 }
 
 impl Handoff<'_> {
-    fn validate(&self, gateway_program: &Pubkey) -> Result<()> {
+    fn validate(&self) -> Result<()> {
         // The gateway's complete_adoption requires the freeze authority to
         // arrive at its PDA. If it sits at this program's own PDA, nothing can
         // ever move it — refuse before the irreversible sweep.
@@ -123,16 +134,6 @@ impl Handoff<'_> {
             return err!(ExtError::InsufficientCollateral);
         }
 
-        // The target is derived, never accepted: the gateway's
-        // `["stablecoin", ext_mint]` PDA for the id passed in.
-        let (expected, _) = Pubkey::find_program_address(
-            &[STABLECOIN_SEED, self.ext_mint.key().as_ref()],
-            gateway_program,
-        );
-        if self.stablecoin.key() != expected || self.stablecoin.owner != gateway_program {
-            return err!(ExtError::InvalidAccount);
-        }
-
         // The account must be a live `Stablecoin` in `AdoptionPending` bound to
         // this mint, so the authority never moves to an unverified target.
         let data = self.stablecoin.try_borrow_data()?;
@@ -148,10 +149,8 @@ impl Handoff<'_> {
         Ok(())
     }
 
-    #[access_control(ctx.accounts.validate(&gateway_program))]
-    pub fn handler(ctx: Context<Self>, gateway_program: Pubkey) -> Result<()> {
-        let _ = gateway_program; // consumed by validate
-
+    #[access_control(ctx.accounts.validate())]
+    pub fn handler(ctx: Context<Self>) -> Result<()> {
         // Move the mint authority to the verified Stablecoin PDA.
         set_authority(
             CpiContext::new_with_signer(
