@@ -1,8 +1,10 @@
 use anchor_lang::prelude::*;
 use cfg_if::cfg_if;
 
+#[cfg(any(feature = "scaled-ui", feature = "no-yield"))]
 pub mod claim_config;
 
+#[cfg(any(feature = "scaled-ui", feature = "no-yield"))]
 pub use claim_config::*;
 
 #[constant]
