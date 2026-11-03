@@ -1,5 +1,9 @@
-// Unit tests for the `handoff` instruction (no-yield builds only): hand the
-// extension's mint over to an M0 V2 Issuer Gateway deployment.
+// Unit tests for the `handoff` instruction (no-yield and scaled-ui builds): hand
+// the extension's mint over to an M0 V2 Issuer Gateway deployment. Every test
+// runs against three mint shapes:
+//   xo     no-yield build, plain mint
+//   usdk   no-yield build, mint with Scaled UI Amount (multiplier fixed at 1.0)
+//   usdky  scaled-ui build, mint with Scaled UI Amount (multiplier above 1.0)
 //
 // The gateway program itself is not loaded — handoff validates the target
 // Stablecoin account by derivation, owner, and bytes, so the tests plant that
@@ -16,6 +20,11 @@
 // [X] given a target not owned by the gateway program   it reverts with InvalidAccount
 // [X] given a target not in AdoptionPending             it reverts with InvalidAccount
 // [X] given a second call after a successful handoff    it reverts
+// [X] given a mint with Scaled UI Amount (usdk, usdky)
+//   [X] it moves the Scaled UI authority to the target and leaves the multiplier alone
+// [X] given a plain mint (xo)                           it touches no Scaled UI authority
+// [X] given ext supply whose multiplied value exceeds the vault (usdky)
+//                                                       it reverts with InsufficientCollateral
 
 import { BN } from "@coral-xyz/anchor";
 import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
@@ -27,6 +36,18 @@ import {
 } from "@solana/spl-token";
 
 import { ExtensionTest, Variant } from "./ext_test_harness";
+
+type Shape = {
+  name: string;
+  variant: Variant.NoYield | Variant.ScaledUi;
+  scaledUiMint: boolean;
+};
+
+const shapes: Shape[] = [
+  { name: "xo", variant: Variant.NoYield, scaledUiMint: false },
+  { name: "usdk", variant: Variant.NoYield, scaledUiMint: true },
+  { name: "usdky", variant: Variant.ScaledUi, scaledUiMint: true },
+];
 
 const initialSupply = new BN(100_000_000); // 100 tokens with 6 decimals
 const initialIndex = new BN(1_100_000_000_000); // 1.1 with 12 decimals
@@ -47,8 +68,8 @@ const gatewayProgram = new PublicKey(
   "EDKMBb8e1DyCZtUrczZeJgxWgMU2nLBCuK31XzPnXWu3"
 );
 
-describe("handoff unit tests", () => {
-  let $: ExtensionTest<Variant.NoYield>;
+describe.each(shapes)("handoff unit tests ($name)", (shape) => {
+  let $: ExtensionTest<any>;
   let vaultMTokenAccount: PublicKey;
   let treasury: Keypair;
   let treasuryMTokenAccount: PublicKey;
@@ -99,9 +120,13 @@ describe("handoff unit tests", () => {
       .rpc();
 
   beforeEach(async () => {
-    $ = new ExtensionTest(Variant.NoYield, TOKEN_2022_PROGRAM_ID, []);
+    $ = new ExtensionTest(shape.variant, TOKEN_2022_PROGRAM_ID, []);
+    $.scaledUiMint = shape.scaledUiMint;
     await $.init(initialSupply, initialIndex);
-    await $.initializeExt([$.admin.publicKey, $.wrapAuthority.publicKey]);
+    await $.initializeExt(
+      [$.admin.publicKey, $.wrapAuthority.publicKey],
+      shape.variant === Variant.ScaledUi ? new BN(0) : undefined
+    );
 
     vaultMTokenAccount = await $.getATA($.mMint.publicKey, $.getMVault());
 
@@ -115,7 +140,19 @@ describe("handoff unit tests", () => {
     // live vault that has earned since its last claim.
     await $.wrap($.admin, wrappedAmount);
     await $.propagateIndex(new BN(1_200_000_000_000));
+    // A scaled-ui ext credits the new index to its holders on sync.
+    if (shape.variant === Variant.ScaledUi) {
+      await $.sync();
+      // The sync credits holders in full while wrap rounded the vault's
+      // principal down, which leaves a zero-fee vault one unit short. A live
+      // vault carries a surplus, so top this one up.
+      await $.mintM($.getMVault(), new BN(1_000));
+    }
   });
+
+  const test_ = shape.scaledUiMint ? test : test.skip;
+  const testPlain = shape.scaledUiMint ? test.skip : test;
+  const testScaledUi = shape.variant === Variant.ScaledUi ? test : test.skip;
 
   test("hands the mint over, sweeps the vault, and tombstones", async () => {
     const stablecoin = plantStablecoin();
@@ -204,4 +241,49 @@ describe("handoff unit tests", () => {
     // The vault ATA is closed, so the account constraints fail before any CPI.
     await $.expectSystemError(handoff(stablecoin));
   });
+
+  test_("moves the Scaled UI authority with the mint authority", async () => {
+    const stablecoin = plantStablecoin();
+    const before = await $.getScaledUiAmountConfig($.extMint.publicKey);
+    expect(before.authority.toBase58()).toEqual(
+      $.getExtMintAuthority().toBase58()
+    );
+
+    await handoff(stablecoin);
+
+    const after = await $.getScaledUiAmountConfig($.extMint.publicKey);
+    expect(after.authority.toBase58()).toEqual(stablecoin.toBase58());
+    expect(after.multiplier).toEqual(before.multiplier);
+    expect(after.newMultiplier).toEqual(before.newMultiplier);
+  });
+
+  testPlain("a plain mint has no Scaled UI authority to move", async () => {
+    const stablecoin = plantStablecoin();
+    await handoff(stablecoin);
+    const mintInfo = await getMint(
+      $.provider.connection,
+      $.extMint.publicKey,
+      undefined,
+      TOKEN_2022_PROGRAM_ID
+    );
+    expect(mintInfo.mintAuthority?.toBase58()).toEqual(stablecoin.toBase58());
+  });
+
+  testScaledUi(
+    "ext supply valued through its multiplier - reverts when it exceeds the vault",
+    async () => {
+      const stablecoin = plantStablecoin();
+      const config = await $.getScaledUiAmountConfig($.extMint.publicKey);
+      expect(config.newMultiplier).toBeGreaterThan(1.05);
+
+      // Raw supply of 26M sits under the vault's value (about 27.27M), so a
+      // raw comparison passes. Times the ext multiplier it is about 28.4M.
+      const mintAccount = $.svm.getAccount($.extMint.publicKey)!;
+      const data = Buffer.from(mintAccount.data);
+      data.writeBigUInt64LE(26_000_000n, 36);
+      $.svm.setAccount($.extMint.publicKey, { ...mintAccount, data });
+
+      await $.expectAnchorError(handoff(stablecoin), "InsufficientCollateral");
+    }
+  );
 });

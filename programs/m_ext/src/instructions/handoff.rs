@@ -6,11 +6,15 @@
 // end state after the remaining authorities move off-chain.
 //
 // In order: gate (admin + solvency), verify the derived target, move the mint
-// authority, sweep the $M vault to the treasury and close it, clear
-// `wrap_authorities` (wrap/unwrap are already dead without the mint
-// authority; the empty list is defense).
+// authority (and the Scaled UI Amount authority when the mint has one), sweep
+// the $M vault to the treasury and close it, clear `wrap_authorities`
+// (wrap/unwrap are already dead without the mint authority; the empty list is
+// defense).
 
-use anchor_lang::{prelude::*, solana_program::program_option::COption};
+use anchor_lang::{
+    prelude::*,
+    solana_program::{program::invoke_signed, program_option::COption},
+};
 use anchor_spl::{
     token_2022::{
         close_account, set_authority, spl_token_2022::instruction::AuthorityType, CloseAccount,
@@ -18,13 +22,16 @@ use anchor_spl::{
     },
     token_interface::{Mint, Token2022, TokenAccount},
 };
+use spl_token_2022::extension::{scaled_ui_amount::ScaledUiAmountConfig, ExtensionType};
 
 use crate::{
     errors::ExtError,
     state::{ExtGlobalV2, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED, M_VAULT_SEED},
-    utils::token::transfer_tokens_from_program,
+    utils::{conversion::get_mint_extensions, token::transfer_tokens_from_program},
 };
-use earn::utils::conversion::{get_scaled_ui_config, principal_to_amount_down};
+use earn::utils::conversion::{
+    get_scaled_ui_config, principal_to_amount_down, principal_to_amount_up,
+};
 
 // The gateway `Stablecoin` wire facts this instruction checks. Pinned here the
 // way other foreign layouts are; the source of truth is
@@ -106,6 +113,14 @@ pub struct Handoff<'info> {
 }
 
 impl Handoff<'_> {
+    // The ext mint's Scaled UI Amount config, when it has one.
+    fn ext_scaled_ui_config(&self) -> Result<Option<ScaledUiAmountConfig>> {
+        if !get_mint_extensions(&self.ext_mint)?.contains(&ExtensionType::ScaledUiAmount) {
+            return Ok(None);
+        }
+        Ok(Some(get_scaled_ui_config(&self.ext_mint)?))
+    }
+
     fn validate(&self) -> Result<()> {
         // The gateway's complete_adoption requires the freeze authority to
         // arrive at its PDA. If it sits at this program's own PDA, nothing can
@@ -117,20 +132,27 @@ impl Handoff<'_> {
         }
 
         // Solvency: vault $M covers the outstanding ext supply (the migrate_m
-        // check). $M is scaled-ui, so the vault principal converts through the
-        // multiplier in force NOW — a scheduled future multiplier must not
-        // value an irreversible sweep.
-        let m_scaled_ui_config = get_scaled_ui_config(&self.m_mint)?;
+        // check). Both sides convert their principal through the multiplier in
+        // force NOW, the vault rounded down and the supply owed rounded up. A
+        // mint without Scaled UI Amount is 1:1 with its principal. A scheduled
+        // future multiplier must not value an irreversible sweep.
         let now = Clock::get()?.unix_timestamp;
-        let multiplier: f64 =
-            if now >= i64::from(m_scaled_ui_config.new_multiplier_effective_timestamp) {
-                m_scaled_ui_config.new_multiplier.into()
+        let in_force = |config: &ScaledUiAmountConfig| -> f64 {
+            if now >= i64::from(config.new_multiplier_effective_timestamp) {
+                config.new_multiplier.into()
             } else {
-                m_scaled_ui_config.multiplier.into()
-            };
-        let vault_m_amount =
-            principal_to_amount_down(self.vault_m_token_account.amount, multiplier)?;
-        if vault_m_amount < self.ext_mint.supply {
+                config.multiplier.into()
+            }
+        };
+        let vault_m_amount = principal_to_amount_down(
+            self.vault_m_token_account.amount,
+            in_force(&get_scaled_ui_config(&self.m_mint)?),
+        )?;
+        let ext_supply_amount = match self.ext_scaled_ui_config()? {
+            Some(config) => principal_to_amount_up(self.ext_mint.supply, in_force(&config))?,
+            None => self.ext_mint.supply,
+        };
+        if vault_m_amount < ext_supply_amount {
             return err!(ExtError::InsufficientCollateral);
         }
 
@@ -167,6 +189,31 @@ impl Handoff<'_> {
             AuthorityType::MintTokens,
             Some(ctx.accounts.stablecoin.key()),
         )?;
+
+        // A Scaled UI Amount mint hands over its multiplier authority too. The
+        // CPI fails, and the whole handoff with it, if this program's PDA does
+        // not hold that authority. anchor-spl's `set_authority` wraps a Token-2022
+        // build that predates this authority type, so the instruction is built here.
+        if ctx.accounts.ext_scaled_ui_config()?.is_some() {
+            invoke_signed(
+                &spl_token_2022::instruction::set_authority(
+                    &ctx.accounts.m_token_program.key(),
+                    &ctx.accounts.ext_mint.key(),
+                    Some(&ctx.accounts.stablecoin.key()),
+                    spl_token_2022::instruction::AuthorityType::ScaledUiAmount,
+                    &ctx.accounts.ext_mint_authority.key(),
+                    &[],
+                )?,
+                &[
+                    ctx.accounts.ext_mint.to_account_info(),
+                    ctx.accounts.ext_mint_authority.to_account_info(),
+                ],
+                &[&[
+                    MINT_AUTHORITY_SEED,
+                    &[ctx.accounts.global_account.ext_mint_authority_bump],
+                ]],
+            )?;
+        }
 
         // Sweep the whole $M unwind: holders hold ext tokens, never $M, so the
         // vault is the only $M account in the system.

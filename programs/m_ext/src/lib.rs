@@ -45,10 +45,10 @@ const _: () = {
         );
     }
 
-    // The V2 gateway handoff supports no-yield builds only; a scaled-ui
-    // handoff must also move the ScaledUiAmount config authority.
-    if cfg!(feature = "handoff") && !cfg!(feature = "no-yield") {
-        panic!("Invalid feature configuration: 'handoff' requires 'no-yield'");
+    // The V2 gateway handoff supports no-yield and scaled-ui builds. A crank
+    // build has earner accounts to retire first.
+    if cfg!(feature = "handoff") && cfg!(feature = "crank") {
+        panic!("Invalid feature configuration: 'handoff' cannot be enabled with 'crank'");
     }
 };
 
