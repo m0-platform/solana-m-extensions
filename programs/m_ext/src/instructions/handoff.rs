@@ -1,40 +1,46 @@
 // Hand this extension's mint over to an M0 V2 Issuer Gateway deployment.
 // One-shot in effect: after it runs the program no longer holds the mint
 // authority, so a second call fails inside the token program. The V2 side
-// must run `adopt_stablecoin` first — the target account is required to be a
-// gateway `Stablecoin` in `AdoptionPending`; `complete_adoption` verifies the
+// must run `adopt_stablecoin` first. The target account is required to be a
+// gateway `Stablecoin` in `AdoptionPending`. `complete_adoption` verifies the
 // end state after the remaining authorities move off-chain.
 //
-// In order: gate (admin + solvency), verify the derived target, move the mint
-// authority (and the Scaled UI Amount authority when the mint has one), sweep
-// the $M vault to the treasury and close it, clear `wrap_authorities`
-// (wrap/unwrap are already dead without the mint authority; the empty list is
-// defense).
+// In order: verify the derived target, sync the ext index so holders keep the
+// yield the vault earned, move the mint authority (and the Scaled UI Amount
+// authority when the mint has one), wrap the whole $M vault into wM and close
+// the vault, clear `wrap_authorities`. The empty list and the closed vault stop
+// any later wrap or unwrap.
+//
+// The vault $M leaves as wM because $M accounts start frozen and the portal
+// does not bridge $M. The wM lands in an account owned by the pinned
+// `RECIPIENT`, who bridges it to close the issuer's V1 position. wM runs this
+// same program, so the wrap is built from this crate's own `Wrap` types. The
+// wM admin must list this program's vault PDA as a wrap authority first.
 
 use anchor_lang::{
     prelude::*,
-    solana_program::{program::invoke_signed, program_option::COption},
+    solana_program::{instruction::Instruction, program::invoke_signed},
+    InstructionData,
 };
 use anchor_spl::{
     token_2022::{
         close_account, set_authority, spl_token_2022::instruction::AuthorityType, CloseAccount,
         SetAuthority,
     },
-    token_interface::{Mint, Token2022, TokenAccount},
+    token_interface::{Mint, Token2022, TokenAccount, TokenInterface},
 };
-use spl_token_2022::extension::{scaled_ui_amount::ScaledUiAmountConfig, ExtensionType};
+use spl_token_2022::extension::ExtensionType;
 
 use crate::{
     errors::ExtError,
     state::{ExtGlobalV2, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED, M_VAULT_SEED},
-    utils::{conversion::get_mint_extensions, token::transfer_tokens_from_program},
-};
-use earn::utils::conversion::{
-    get_scaled_ui_config, principal_to_amount_down, principal_to_amount_up,
+    utils::conversion::{
+        get_mint_extensions, multiplier_to_index, principal_to_amount_up, sync_index,
+    },
 };
 
 // The gateway `Stablecoin` wire facts this instruction checks. Pinned here the
-// way other foreign layouts are; the source of truth is
+// way other foreign layouts are. The source of truth is
 // m0-v2/svm/crates/state/src/stablecoin.rs.
 const STABLECOIN_SEED: &[u8] = b"stablecoin";
 const STABLECOIN_DISCRIMINATOR: u8 = 2;
@@ -43,10 +49,18 @@ const MINT_ORIGIN_OFFSET: usize = 5;
 const MINT_ORIGIN_ADOPTION_PENDING: u8 = 1;
 const MINT_OFFSET: usize = 10;
 
-// The issuer's gateway program id, fixed at build time (`GATEWAY_PROGRAM_ID`).
-// Each issuer deploys its own gateway, so the id is pinned per upgrade binary
-// instead of being accepted from the admin.
-const GATEWAY_PROGRAM_ID: Pubkey = Pubkey::from_str_const(env!("GATEWAY_PROGRAM_ID"));
+// The issuer's gateway program id. Each issuer deploys its own gateway, so
+// each cutover sets this line and ships its own binary. The admin never
+// supplies it. This value is the test gateway.
+const GATEWAY_PROGRAM_ID: Pubkey = pubkey!("EDKMBb8e1DyCZtUrczZeJgxWgMU2nLBCuK31XzPnXWu3");
+
+// The issuer wallet that must own the account receiving the wrapped vault. Set
+// with the gateway id for each cutover, so a stolen admin key cannot redirect
+// the vault. This value is the test recipient.
+const RECIPIENT: Pubkey = pubkey!("8dDyonHjmXBUpTy6hkWd4CbKHLeqkimv4SpR1ZqK2G3t");
+
+// wM, the extension the vault is wrapped into.
+const WM_PROGRAM_ID: Pubkey = pubkey!("wMXX1K1nca5W4pZr1piETe78gcAVVrEFi9f4g46uXko");
 
 #[derive(Accounts)]
 pub struct Handoff<'info> {
@@ -61,12 +75,12 @@ pub struct Handoff<'info> {
         has_one = ext_mint @ ExtError::InvalidAccount,
         has_one = m_mint @ ExtError::InvalidAccount,
     )]
-    pub global_account: Account<'info, ExtGlobalV2>,
+    pub global_account: Box<Account<'info, ExtGlobalV2>>,
 
-    #[account(mut, mint::token_program = m_token_program)]
-    pub ext_mint: InterfaceAccount<'info, Mint>,
+    #[account(mut, mint::token_program = ext_token_program)]
+    pub ext_mint: Box<InterfaceAccount<'info, Mint>>,
 
-    /// CHECK: Validated by the seed; signs the mint-authority transfer.
+    /// CHECK: Validated by the seed. Signs the authority moves.
     #[account(
         seeds = [MINT_AUTHORITY_SEED],
         bump = global_account.ext_mint_authority_bump,
@@ -84,9 +98,9 @@ pub struct Handoff<'info> {
     pub stablecoin: AccountInfo<'info>,
 
     #[account(mint::token_program = m_token_program)]
-    pub m_mint: InterfaceAccount<'info, Mint>,
+    pub m_mint: Box<InterfaceAccount<'info, Mint>>,
 
-    /// CHECK: Validated by the seed; signs the vault sweep and close.
+    /// CHECK: Validated by the seed. Signs the wrap and the vault close.
     #[account(
         seeds = [M_VAULT_SEED],
         bump = global_account.m_vault_bump,
@@ -99,67 +113,48 @@ pub struct Handoff<'info> {
         associated_token::authority = m_vault,
         associated_token::token_program = m_token_program,
     )]
-    pub vault_m_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub vault_m_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The M0 treasury account the swept $M lands in; M0 redeems it off-program.
+    #[account(mut, mint::token_program = wm_token_program)]
+    pub wm_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    /// The issuer's account that receives the wrapped vault.
     #[account(
         mut,
-        token::mint = m_mint,
-        token::token_program = m_token_program,
+        token::mint = wm_mint,
+        token::authority = RECIPIENT,
+        token::token_program = wm_token_program,
     )]
-    pub treasury_m_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub recipient_wm_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// CHECK: Pinned by address. wM runs this program's code at another id,
+    /// so no program type exists for it.
+    #[account(address = WM_PROGRAM_ID @ ExtError::InvalidAccount)]
+    pub wm_program: UncheckedAccount<'info>,
+    /// CHECK: wM's `ExtGlobalV2`. `Account<ExtGlobalV2>` would refuse it,
+    /// because wM owns it, not this program. wM's wrap checks its seed and
+    /// bump and binds `m_mint` and `wm_mint` to it.
+    #[account(mut)]
+    pub wm_global: UncheckedAccount<'info>,
+    /// CHECK: wM's data-free vault PDA. wM's wrap checks its seed.
+    pub wm_m_vault: UncheckedAccount<'info>,
+    /// CHECK: wM's data-free mint authority PDA. wM's wrap checks its seed.
+    pub wm_mint_authority: UncheckedAccount<'info>,
+    /// CHECK: wM's $M vault ATA. wM's wrap checks the ATA derivation.
+    #[account(mut)]
+    pub wm_vault_m_token_account: UncheckedAccount<'info>,
 
     pub m_token_program: Program<'info, Token2022>,
+    pub ext_token_program: Interface<'info, TokenInterface>,
+    pub wm_token_program: Interface<'info, TokenInterface>,
 }
 
 impl Handoff<'_> {
-    // The ext mint's Scaled UI Amount config, when it has one.
-    fn ext_scaled_ui_config(&self) -> Result<Option<ScaledUiAmountConfig>> {
-        if !get_mint_extensions(&self.ext_mint)?.contains(&ExtensionType::ScaledUiAmount) {
-            return Ok(None);
-        }
-        Ok(Some(get_scaled_ui_config(&self.ext_mint)?))
-    }
-
     fn validate(&self) -> Result<()> {
-        // The gateway's complete_adoption requires the freeze authority to
-        // arrive at its PDA. If it sits at this program's own PDA, nothing can
-        // ever move it — refuse before the irreversible sweep.
-        if self.ext_mint.freeze_authority
-            == COption::Some(self.ext_mint_authority.key())
-        {
-            return err!(ExtError::FreezeAuthorityUnreachable);
-        }
-
-        // Solvency: vault $M covers the outstanding ext supply (the migrate_m
-        // check). Both sides convert their principal through the multiplier in
-        // force NOW, the vault rounded down and the supply owed rounded up. A
-        // mint without Scaled UI Amount is 1:1 with its principal. A scheduled
-        // future multiplier must not value an irreversible sweep.
-        let now = Clock::get()?.unix_timestamp;
-        let in_force = |config: &ScaledUiAmountConfig| -> f64 {
-            if now >= i64::from(config.new_multiplier_effective_timestamp) {
-                config.new_multiplier.into()
-            } else {
-                config.multiplier.into()
-            }
-        };
-        let vault_m_amount = principal_to_amount_down(
-            self.vault_m_token_account.amount,
-            in_force(&get_scaled_ui_config(&self.m_mint)?),
-        )?;
-        let ext_supply_amount = match self.ext_scaled_ui_config()? {
-            Some(config) => principal_to_amount_up(self.ext_mint.supply, in_force(&config))?,
-            None => self.ext_mint.supply,
-        };
-        if vault_m_amount < ext_supply_amount {
-            return err!(ExtError::InsufficientCollateral);
-        }
-
         // The account must be a live `Stablecoin` in `AdoptionPending` bound to
         // this mint, so the authority never moves to an unverified target.
         let data = self.stablecoin.try_borrow_data()?;
-        if data.len() <= MINT_OFFSET + 32
+        if data.len() < MINT_OFFSET + 32
             || data[0] != STABLECOIN_DISCRIMINATOR
             || data[1] != STABLECOIN_ACCOUNT_VERSION
             || data[MINT_ORIGIN_OFFSET] != MINT_ORIGIN_ADOPTION_PENDING
@@ -173,18 +168,34 @@ impl Handoff<'_> {
 
     #[access_control(ctx.accounts.validate())]
     pub fn handler(ctx: Context<Self>) -> Result<()> {
+        let mint_authority_seeds: &[&[&[u8]]] = &[&[
+            MINT_AUTHORITY_SEED,
+            &[ctx.accounts.global_account.ext_mint_authority_bump],
+        ]];
+
+        // Credit holders the yield the vault earned, or the wrap below sends it
+        // to the recipient. A scaled-ui build updates the multiplier, which only
+        // this program's PDA can sign, so it runs before that authority moves.
+        // Other builds return at once.
+        sync_index(
+            &mut ctx.accounts.ext_mint,
+            &mut ctx.accounts.global_account,
+            &ctx.accounts.m_mint,
+            &ctx.accounts.vault_m_token_account,
+            &ctx.accounts.ext_mint_authority,
+            mint_authority_seeds,
+            &ctx.accounts.ext_token_program,
+        )?;
+
         // Move the mint authority to the verified Stablecoin PDA.
         set_authority(
             CpiContext::new_with_signer(
-                ctx.accounts.m_token_program.to_account_info(),
+                ctx.accounts.ext_token_program.to_account_info(),
                 SetAuthority {
                     current_authority: ctx.accounts.ext_mint_authority.to_account_info(),
                     account_or_mint: ctx.accounts.ext_mint.to_account_info(),
                 },
-                &[&[
-                    MINT_AUTHORITY_SEED,
-                    &[ctx.accounts.global_account.ext_mint_authority_bump],
-                ]],
+                mint_authority_seeds,
             ),
             AuthorityType::MintTokens,
             Some(ctx.accounts.stablecoin.key()),
@@ -194,10 +205,10 @@ impl Handoff<'_> {
         // CPI fails, and the whole handoff with it, if this program's PDA does
         // not hold that authority. anchor-spl's `set_authority` wraps a Token-2022
         // build that predates this authority type, so the instruction is built here.
-        if ctx.accounts.ext_scaled_ui_config()?.is_some() {
+        if get_mint_extensions(&ctx.accounts.ext_mint)?.contains(&ExtensionType::ScaledUiAmount) {
             invoke_signed(
                 &spl_token_2022::instruction::set_authority(
-                    &ctx.accounts.m_token_program.key(),
+                    &ctx.accounts.ext_token_program.key(),
                     &ctx.accounts.ext_mint.key(),
                     Some(&ctx.accounts.stablecoin.key()),
                     spl_token_2022::instruction::AuthorityType::ScaledUiAmount,
@@ -208,29 +219,66 @@ impl Handoff<'_> {
                     ctx.accounts.ext_mint.to_account_info(),
                     ctx.accounts.ext_mint_authority.to_account_info(),
                 ],
-                &[&[
-                    MINT_AUTHORITY_SEED,
-                    &[ctx.accounts.global_account.ext_mint_authority_bump],
-                ]],
+                mint_authority_seeds,
             )?;
         }
 
-        // Sweep the whole $M unwind: holders hold ext tokens, never $M, so the
-        // vault is the only $M account in the system.
+        // Wrap the whole vault: holders hold ext tokens, never $M, so the vault
+        // is the only $M account in the system. `wrap` takes an $M amount and
+        // floors it back to principal at the same index, so rounding the amount
+        // up returns exactly the vault principal and the close below sees zero.
         let vault_seeds: &[&[&[u8]]] =
             &[&[M_VAULT_SEED, &[ctx.accounts.global_account.m_vault_bump]]];
         let vault_principal = ctx.accounts.vault_m_token_account.amount;
         if vault_principal > 0 {
-            transfer_tokens_from_program(
-                &ctx.accounts.vault_m_token_account,
-                &ctx.accounts.treasury_m_token_account,
-                vault_principal,
-                &ctx.accounts.m_mint,
-                &ctx.accounts.m_vault,
+            let m_index = multiplier_to_index(
+                earn::utils::conversion::get_scaled_ui_config(&ctx.accounts.m_mint)?
+                    .new_multiplier
+                    .into(),
+            )?;
+            let amount = principal_to_amount_up(vault_principal, m_index)?;
+
+            // The vault PDA owns the $M and is on wM's wrap list, so it signs
+            // as both the token authority and the wrap authority.
+            let a = &ctx.accounts;
+            let accounts = crate::accounts::Wrap {
+                token_authority: a.m_vault.key(),
+                wrap_authority: Some(a.m_vault.key()),
+                m_mint: a.m_mint.key(),
+                ext_mint: a.wm_mint.key(),
+                global_account: a.wm_global.key(),
+                m_vault: a.wm_m_vault.key(),
+                ext_mint_authority: a.wm_mint_authority.key(),
+                from_m_token_account: a.vault_m_token_account.key(),
+                vault_m_token_account: a.wm_vault_m_token_account.key(),
+                to_ext_token_account: a.recipient_wm_token_account.key(),
+                m_token_program: a.m_token_program.key(),
+                ext_token_program: a.wm_token_program.key(),
+            };
+            invoke_signed(
+                &Instruction {
+                    program_id: WM_PROGRAM_ID,
+                    accounts: accounts.to_account_metas(None),
+                    data: crate::instruction::Wrap { amount }.data(),
+                },
+                &[
+                    a.m_vault.to_account_info(),
+                    a.m_mint.to_account_info(),
+                    a.wm_mint.to_account_info(),
+                    a.wm_global.to_account_info(),
+                    a.wm_m_vault.to_account_info(),
+                    a.wm_mint_authority.to_account_info(),
+                    a.vault_m_token_account.to_account_info(),
+                    a.wm_vault_m_token_account.to_account_info(),
+                    a.recipient_wm_token_account.to_account_info(),
+                    a.m_token_program.to_account_info(),
+                    a.wm_token_program.to_account_info(),
+                    a.wm_program.to_account_info(),
+                ],
                 vault_seeds,
-                &ctx.accounts.m_token_program,
             )?;
         }
+
         close_account(CpiContext::new_with_signer(
             ctx.accounts.m_token_program.to_account_info(),
             CloseAccount {
@@ -241,7 +289,7 @@ impl Handoff<'_> {
             vault_seeds,
         ))?;
 
-        // Tombstone: wrap/unwrap already fail without the mint authority.
+        // Tombstone: no key may wrap or unwrap again.
         ctx.accounts.global_account.wrap_authorities = vec![];
 
         Ok(())

@@ -5,37 +5,45 @@
 //   usdk   no-yield build, mint with Scaled UI Amount (multiplier fixed at 1.0)
 //   usdky  scaled-ui build, mint with Scaled UI Amount (multiplier above 1.0)
 //
-// The gateway program itself is not loaded — handoff validates the target
+// The gateway program itself is not loaded. handoff validates the target
 // Stablecoin account by derivation, owner, and bytes, so the tests plant that
-// account directly with `setAccount`.
+// account directly with `setAccount`. A crank build at the wM id (ext_wm.so,
+// see the Makefile) is loaded so the vault wrap runs for real.
 //
-// [X] given the admin, a solvent vault, and an AdoptionPending target
+// [X] given the admin, a funded vault, and an AdoptionPending target
 //   [X] it moves the mint authority to the target
-//   [X] it sweeps the vault to the treasury and closes the vault ATA
+//   [X] it wraps the whole vault into wM for the issuer and closes the vault ATA
 //   [X] it clears the wrap authorities
-//   [X] wrap and unwrap are dead afterwards
+//   [X] wrap is dead afterwards
+// [X] given an empty vault                              it hands over and closes the vault with no wrap
 // [X] given a non-admin signer                          it reverts with NotAuthorized
-// [X] given vault M below the ext supply                it reverts with InsufficientCollateral
 // [X] given a target that is not the derived PDA        it reverts with ConstraintSeeds
 // [X] given a target not owned by the gateway program   it reverts with InvalidAccount
 // [X] given a target not in AdoptionPending             it reverts with InvalidAccount
+// [X] given a target with a wrong discriminator, version, mint or length
+//                                                       it reverts with InvalidAccount
+// [X] given a wrap program that is not wM               it reverts with InvalidAccount
+// [X] given a vault PDA off wM's wrap list              it reverts with NotAuthorized
+// [X] given a recipient account for another mint        it reverts with ConstraintTokenMint
+// [X] given a recipient not owned by the pinned wallet  it reverts with ConstraintTokenOwner
 // [X] given a second call after a successful handoff    it reverts
 // [X] given a mint with Scaled UI Amount (usdk, usdky)
-//   [X] it moves the Scaled UI authority to the target and leaves the multiplier alone
+//   [X] it moves the Scaled UI authority to the target
+// [X] given an unsynced scaled-ui ext (usdky)           it syncs holder yield before the wrap
 // [X] given a plain mint (xo)                           it touches no Scaled UI authority
-// [X] given ext supply whose multiplied value exceeds the vault (usdky)
-//                                                       it reverts with InsufficientCollateral
 
-import { BN } from "@coral-xyz/anchor";
-import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { BN, Program } from "@coral-xyz/anchor";
+import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
-  AuthorityType,
   TOKEN_2022_PROGRAM_ID,
-  createSetAuthorityInstruction,
+  getAssociatedTokenAddressSync,
   getMint,
 } from "@solana/spl-token";
 
 import { ExtensionTest, Variant } from "./ext_test_harness";
+import { MExt as CrankExt } from "../../target/types/crank";
+
+const CRANK_IDL = require("../../target/idl/crank.json");
 
 type Shape = {
   name: string;
@@ -52,6 +60,7 @@ const shapes: Shape[] = [
 const initialSupply = new BN(100_000_000); // 100 tokens with 6 decimals
 const initialIndex = new BN(1_100_000_000_000); // 1.1 with 12 decimals
 const wrappedAmount = new BN(25_000_000); // 25 tokens with 6 decimals
+const INDEX_SCALE = new BN(1_000_000_000_000);
 
 // Gateway `Stablecoin` wire facts, mirroring the constants in
 // programs/m_ext/src/instructions/handoff.rs.
@@ -62,17 +71,38 @@ const MINT_ORIGIN_OFFSET = 5;
 const MINT_ORIGIN_ADOPTION_PENDING = 1;
 const MINT_OFFSET = 10;
 
-// The gateway id the test binary pins, the `GATEWAY_PROGRAM_ID` default in
-// .cargo/config.toml.
+// The gateway id the test binary pins, `GATEWAY_PROGRAM_ID` in
+// programs/m_ext/src/instructions/handoff.rs.
 const gatewayProgram = new PublicKey(
   "EDKMBb8e1DyCZtUrczZeJgxWgMU2nLBCuK31XzPnXWu3"
 );
 
+// The issuer wallet the test binary pins, `RECIPIENT` in
+// programs/m_ext/src/instructions/handoff.rs.
+const recipient = new PublicKey("8dDyonHjmXBUpTy6hkWd4CbKHLeqkimv4SpR1ZqK2G3t");
+
+// wM, `WM_PROGRAM_ID` in programs/m_ext/src/instructions/handoff.rs.
+const wmProgramId = new PublicKey(
+  "wMXX1K1nca5W4pZr1piETe78gcAVVrEFi9f4g46uXko"
+);
+
+const pda = (seed: string, program: PublicKey): PublicKey =>
+  PublicKey.findProgramAddressSync([Buffer.from(seed)], program)[0];
+
 describe.each(shapes)("handoff unit tests ($name)", (shape) => {
   let $: ExtensionTest<any>;
+  let wm: Program<CrankExt>;
+  let wmMint: Keypair;
   let vaultMTokenAccount: PublicKey;
-  let treasury: Keypair;
-  let treasuryMTokenAccount: PublicKey;
+  let issuerWmTokenAccount: PublicKey;
+
+  const mAta = (owner: PublicKey): PublicKey =>
+    getAssociatedTokenAddressSync(
+      $.mMint.publicKey,
+      owner,
+      true,
+      TOKEN_2022_PROGRAM_ID
+    );
 
   const stablecoinPda = (): PublicKey =>
     PublicKey.findProgramAddressSync(
@@ -85,6 +115,7 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     address?: PublicKey;
     owner?: PublicKey;
     mintOrigin?: number;
+    edit?: (data: Buffer) => Buffer;
   }): PublicKey => {
     const address = opts?.address ?? stablecoinPda();
     const data = Buffer.alloc(STABLECOIN_LEN);
@@ -94,18 +125,27 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     $.extMint.publicKey.toBuffer().copy(data, MINT_OFFSET);
     $.svm.setAccount(address, {
       lamports: 10_000_000,
-      data,
+      data: opts?.edit ? opts.edit(data) : data,
       owner: opts?.owner ?? gatewayProgram,
       executable: false,
     });
     return address;
   };
 
-  const handoff = (stablecoin: PublicKey, signer?: Keypair) =>
-    $.ext.methods
+  const handoff = (
+    stablecoin: PublicKey,
+    opts?: {
+      signer?: Keypair;
+      wmProgram?: PublicKey;
+      recipientWmTokenAccount?: PublicKey;
+    }
+  ) => {
+    const signer = opts?.signer ?? $.admin;
+    const wmVault = pda("m_vault", wmProgramId);
+    return $.ext.methods
       .handoff()
       .accountsPartial({
-        admin: (signer ?? $.admin).publicKey,
+        admin: signer.publicKey,
         globalAccount: $.getExtGlobalAccount(),
         extMint: $.extMint.publicKey,
         extMintAuthority: $.getExtMintAuthority(),
@@ -113,11 +153,49 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
         mMint: $.mMint.publicKey,
         mVault: $.getMVault(),
         vaultMTokenAccount,
-        treasuryMTokenAccount,
+        wmMint: wmMint.publicKey,
+        recipientWmTokenAccount:
+          opts?.recipientWmTokenAccount ?? issuerWmTokenAccount,
+        wmProgram: opts?.wmProgram ?? wmProgramId,
+        wmGlobal: pda("global", wmProgramId),
+        wmMVault: wmVault,
+        wmMintAuthority: pda("mint_authority", wmProgramId),
+        wmVaultMTokenAccount: mAta(wmVault),
         mTokenProgram: TOKEN_2022_PROGRAM_ID,
+        extTokenProgram: TOKEN_2022_PROGRAM_ID,
+        wmTokenProgram: TOKEN_2022_PROGRAM_ID,
       })
-      .signers([signer ?? $.admin])
+      .signers([signer])
       .rpc();
+  };
+
+  // Load wM and wire it the way the cutover needs: the wM admin lists this
+  // extension's vault PDA as a wrap authority.
+  const setUpWm = async () => {
+    $.svm.addProgramFromFile(wmProgramId, "tests/programs/ext_wm.so");
+    wm = new Program<CrankExt>(
+      { ...CRANK_IDL, address: wmProgramId },
+      $.provider
+    );
+
+    wmMint = new Keypair();
+    const wmMintAuthority = pda("mint_authority", wmProgramId);
+    await $.createMint(wmMint, wmMintAuthority, wmMintAuthority, true);
+    await $.addMEarner(pda("m_vault", wmProgramId));
+    await wm.methods
+      .initialize([$.getMVault()], $.admin.publicKey)
+      .accounts({
+        admin: $.admin.publicKey,
+        mMint: $.mMint.publicKey,
+        extMint: wmMint.publicKey,
+        extTokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .signers([$.admin])
+      .rpc();
+
+    // The issuer's wM account. wM accounts are not frozen, so no earner step.
+    issuerWmTokenAccount = await $.getATA(wmMint.publicKey, recipient);
+  };
 
   beforeEach(async () => {
     $ = new ExtensionTest(shape.variant, TOKEN_2022_PROGRAM_ID, []);
@@ -127,37 +205,27 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
       [$.admin.publicKey, $.wrapAuthority.publicKey],
       shape.variant === Variant.ScaledUi ? new BN(0) : undefined
     );
+    await setUpWm();
 
     vaultMTokenAccount = await $.getATA($.mMint.publicKey, $.getMVault());
 
-    // The treasury holds a thawed $M account (M accounts thaw via earner status).
-    treasury = new Keypair();
-    await $.addMEarner(treasury.publicKey);
-    treasuryMTokenAccount = await $.getATA($.mMint.publicKey, treasury.publicKey);
-
-    // Nonzero supply and a solvent vault, as at any real cutover. The index
-    // bump accrues the vault (an M earner) past wrap's round-down, mirroring a
-    // live vault that has earned since its last claim.
+    // Nonzero supply and a funded vault, as at any real cutover. The index
+    // bump accrues the vault (an M earner) past its last claim. A scaled-ui
+    // ext stays unsynced, as a live one usually is, so handoff must sync it.
     await $.wrap($.admin, wrappedAmount);
     await $.propagateIndex(new BN(1_200_000_000_000));
-    // A scaled-ui ext credits the new index to its holders on sync.
-    if (shape.variant === Variant.ScaledUi) {
-      await $.sync();
-      // The sync credits holders in full while wrap rounded the vault's
-      // principal down, which leaves a zero-fee vault one unit short. A live
-      // vault carries a surplus, so top this one up.
-      await $.mintM($.getMVault(), new BN(1_000));
-    }
   });
 
-  const test_ = shape.scaledUiMint ? test : test.skip;
+  const testScaledUiMint = shape.scaledUiMint ? test : test.skip;
   const testPlain = shape.scaledUiMint ? test.skip : test;
   const testScaledUi = shape.variant === Variant.ScaledUi ? test : test.skip;
 
-  test("hands the mint over, sweeps the vault, and tombstones", async () => {
+  test("hands the mint over, wraps the vault into wM, and tombstones", async () => {
     const stablecoin = plantStablecoin();
-    const vaultBalanceBefore = await $.getTokenBalance(vaultMTokenAccount);
-    expect(BigInt(vaultBalanceBefore.toString())).toBeGreaterThan(0n);
+    const wmVault = mAta(pda("m_vault", wmProgramId));
+    const vaultPrincipal = await $.getTokenBalance(vaultMTokenAccount);
+    expect(vaultPrincipal.gtn(0)).toBe(true);
+    const wmVaultBefore = await $.getTokenBalance(wmVault);
 
     await handoff(stablecoin);
 
@@ -170,15 +238,29 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     );
     expect(mintInfo.mintAuthority?.toBase58()).toEqual(stablecoin.toBase58());
 
-    // Vault swept in full and closed (litesvm keeps a zero-lamport stub);
-    // the treasury holds the balance.
+    // Every unit of vault principal moved into the wM vault, and the V1 vault
+    // closed (litesvm keeps a zero-lamport stub).
     const vaultAfter = $.svm.getAccount(vaultMTokenAccount);
     expect(!vaultAfter || Number(vaultAfter.lamports) === 0).toBe(true);
-    const treasuryBalance = await $.getTokenBalance(treasuryMTokenAccount);
-    expect(treasuryBalance.toString()).toEqual(vaultBalanceBefore.toString());
+    const wmVaultAfter = await $.getTokenBalance(wmVault);
+    expect(wmVaultAfter.sub(wmVaultBefore).toString()).toEqual(
+      vaultPrincipal.toString()
+    );
+
+    // The issuer holds the vault's $M amount as wM: principal times the M
+    // index, rounded up, which wrap floors back to the vault principal.
+    const mIndex = await $.getCurrentMIndex();
+    const expectedWm = vaultPrincipal
+      .mul(mIndex)
+      .add(INDEX_SCALE.subn(1))
+      .div(INDEX_SCALE);
+    const issuerWm = await $.getTokenBalance(issuerWmTokenAccount);
+    expect(issuerWm.toString()).toEqual(expectedWm.toString());
 
     // Tombstone: no wrap authorities remain.
-    const global = await $.ext.account.extGlobalV2.fetch($.getExtGlobalAccount());
+    const global = await $.ext.account.extGlobalV2.fetch(
+      $.getExtGlobalAccount()
+    );
     expect(global.wrapAuthorities.length).toEqual(0);
 
     // Wrap is dead: the authority list is empty.
@@ -187,19 +269,10 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
 
   test("non-admin signer - reverts", async () => {
     const stablecoin = plantStablecoin();
-    await $.expectAnchorError(handoff(stablecoin, $.nonAdmin), "NotAuthorized");
-  });
-
-  test("vault M below ext supply - reverts", async () => {
-    const stablecoin = plantStablecoin();
-
-    // Inflate the ext supply past the vault's cover (u64 LE at mint offset 36).
-    const mintAccount = $.svm.getAccount($.extMint.publicKey)!;
-    const data = Buffer.from(mintAccount.data);
-    data.writeBigUInt64LE(BigInt(wrappedAmount.toString()) * 10n, 36);
-    $.svm.setAccount($.extMint.publicKey, { ...mintAccount, data });
-
-    await $.expectAnchorError(handoff(stablecoin), "InsufficientCollateral");
+    await $.expectAnchorError(
+      handoff(stablecoin, { signer: $.nonAdmin }),
+      "NotAuthorized"
+    );
   });
 
   test("target is not the derived PDA - reverts", async () => {
@@ -219,20 +292,71 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     await $.expectAnchorError(handoff(stablecoin), "InvalidAccount");
   });
 
-  test("freeze authority held by the program's own PDA - reverts", async () => {
-    const stablecoin = plantStablecoin();
-    // Park the freeze authority at the ext mint authority PDA: unreachable forever.
-    const parkIx = createSetAuthorityInstruction(
-      $.extMint.publicKey,
-      $.admin.publicKey,
-      AuthorityType.FreezeAccount,
-      $.getExtMintAuthority(),
-      [],
-      TOKEN_2022_PROGRAM_ID
-    );
-    await $.provider.sendAndConfirm!(new Transaction().add(parkIx), [$.admin]);
+  test.each<[string, (data: Buffer) => Buffer]>([
+    ["discriminator", (d) => (d.fill(9, 0, 1), d)],
+    ["account version", (d) => (d.fill(9, 1, 2), d)],
+    [
+      "mint",
+      (d) => (Keypair.generate().publicKey.toBuffer().copy(d, MINT_OFFSET), d),
+    ],
+    ["length", (d) => d.subarray(0, MINT_OFFSET + 31)],
+  ])("target with a wrong %s - reverts", async (_, edit) => {
+    const stablecoin = plantStablecoin({ edit });
+    await $.expectAnchorError(handoff(stablecoin), "InvalidAccount");
+  });
 
-    await $.expectAnchorError(handoff(stablecoin), "FreezeAuthorityUnreachable");
+  test("empty vault - hands over and closes the vault with no wrap", async () => {
+    const stablecoin = plantStablecoin();
+    const vault = $.svm.getAccount(vaultMTokenAccount)!;
+    const data = Buffer.from(vault.data);
+    data.writeBigUInt64LE(0n, 64); // token account amount
+    $.svm.setAccount(vaultMTokenAccount, { ...vault, data });
+
+    await handoff(stablecoin);
+
+    const vaultAfter = $.svm.getAccount(vaultMTokenAccount);
+    expect(!vaultAfter || Number(vaultAfter.lamports) === 0).toBe(true);
+    const issuerWm = await $.getTokenBalance(issuerWmTokenAccount);
+    expect(issuerWm.toString()).toEqual("0");
+  });
+
+  test("wrap program is not wM - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    await $.expectAnchorError(
+      handoff(stablecoin, { wmProgram: $.ext.programId }),
+      "InvalidAccount"
+    );
+  });
+
+  test("vault PDA not on wM's wrap list - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    await wm.methods
+      .removeWrapAuthority($.getMVault())
+      .accounts({ admin: $.admin.publicKey })
+      .signers([$.admin])
+      .rpc();
+    await $.expectAnchorError(handoff(stablecoin), "NotAuthorized");
+  });
+
+  test("recipient account holds another mint - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    const extAccount = await $.getATA($.extMint.publicKey, recipient);
+    await $.expectAnchorError(
+      handoff(stablecoin, { recipientWmTokenAccount: extAccount }),
+      "ConstraintTokenMint"
+    );
+  });
+
+  test("recipient account not owned by the pinned wallet - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    const elsewhere = await $.getATA(
+      wmMint.publicKey,
+      Keypair.generate().publicKey
+    );
+    await $.expectAnchorError(
+      handoff(stablecoin, { recipientWmTokenAccount: elsewhere }),
+      "ConstraintTokenOwner"
+    );
   });
 
   test("second call after a successful handoff - reverts", async () => {
@@ -242,19 +366,31 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     await $.expectSystemError(handoff(stablecoin));
   });
 
-  test_("moves the Scaled UI authority with the mint authority", async () => {
+  testScaledUiMint(
+    "moves the Scaled UI authority with the mint authority",
+    async () => {
+      const stablecoin = plantStablecoin();
+      const before = await $.getScaledUiAmountConfig($.extMint.publicKey);
+      expect(before.authority.toBase58()).toEqual(
+        $.getExtMintAuthority().toBase58()
+      );
+
+      await handoff(stablecoin);
+
+      const after = await $.getScaledUiAmountConfig($.extMint.publicKey);
+      expect(after.authority.toBase58()).toEqual(stablecoin.toBase58());
+    }
+  );
+
+  testScaledUi("syncs holder yield before the wrap", async () => {
     const stablecoin = plantStablecoin();
     const before = await $.getScaledUiAmountConfig($.extMint.publicKey);
-    expect(before.authority.toBase58()).toEqual(
-      $.getExtMintAuthority().toBase58()
-    );
-
     await handoff(stablecoin);
 
+    // The multiplier rises to the propagated index, so holders keep the yield
+    // instead of it reaching the recipient as wM.
     const after = await $.getScaledUiAmountConfig($.extMint.publicKey);
-    expect(after.authority.toBase58()).toEqual(stablecoin.toBase58());
-    expect(after.multiplier).toEqual(before.multiplier);
-    expect(after.newMultiplier).toEqual(before.newMultiplier);
+    expect(after.newMultiplier).toBeGreaterThan(before.newMultiplier);
   });
 
   testPlain("a plain mint has no Scaled UI authority to move", async () => {
@@ -268,22 +404,4 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     );
     expect(mintInfo.mintAuthority?.toBase58()).toEqual(stablecoin.toBase58());
   });
-
-  testScaledUi(
-    "ext supply valued through its multiplier - reverts when it exceeds the vault",
-    async () => {
-      const stablecoin = plantStablecoin();
-      const config = await $.getScaledUiAmountConfig($.extMint.publicKey);
-      expect(config.newMultiplier).toBeGreaterThan(1.05);
-
-      // Raw supply of 26M sits under the vault's value (about 27.27M), so a
-      // raw comparison passes. Times the ext multiplier it is about 28.4M.
-      const mintAccount = $.svm.getAccount($.extMint.publicKey)!;
-      const data = Buffer.from(mintAccount.data);
-      data.writeBigUInt64LE(26_000_000n, 36);
-      $.svm.setAccount($.extMint.publicKey, { ...mintAccount, data });
-
-      await $.expectAnchorError(handoff(stablecoin), "InsufficientCollateral");
-    }
-  );
 });
