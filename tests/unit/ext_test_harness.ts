@@ -1,6 +1,5 @@
 import { Program, AnchorError, BN } from "@coral-xyz/anchor";
-import { LiteSVM } from "litesvm";
-import { LiteSVMProvider } from "anchor-litesvm";
+import { LiteSVM, LiteSVMProvider } from "../litesvm";
 import {
   PublicKey,
   Keypair,

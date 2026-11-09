@@ -99,7 +99,7 @@ impl RemoveWrapAuthority<'_> {
         ctx.accounts
             .global_account
             .to_account_info()
-            .realloc(new_size, false)?;
+            .resize(new_size)?;
 
         // Refund excess lamports to the admin
         let current_lamports = ctx.accounts.global_account.to_account_info().lamports();

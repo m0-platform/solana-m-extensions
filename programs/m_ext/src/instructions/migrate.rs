@@ -9,6 +9,7 @@ use anchor_lang::{
     prelude::*,
     system_program::{transfer, Transfer},
 };
+use anchor_spl::token_2022::spl_token_2022;
 use anchor_spl::{
     token_2022::spl_token_2022::state::AccountState,
     token_interface::{Mint, Token2022, TokenAccount},
@@ -182,7 +183,7 @@ impl MigrateM<'_> {
         // We need to take into account the current number of wrap authorities
         let new_size = ExtGlobalV2::size(old_global.wrap_authorities.len());
         let account_info = ctx.accounts.global_account.to_account_info();
-        account_info.realloc(new_size, false)?;
+        account_info.resize(new_size)?;
 
         // Send lamports to the global account to cover the resize cost
         let rent_exempt_lamports = Rent::get().unwrap().minimum_balance(new_size).max(1);
@@ -191,7 +192,7 @@ impl MigrateM<'_> {
         if top_up_lamports > 0 {
             transfer(
                 CpiContext::new(
-                    ctx.accounts.system_program.to_account_info(),
+                    ctx.accounts.system_program.key(),
                     Transfer {
                         from: ctx.accounts.admin.to_account_info(),
                         to: account_info,

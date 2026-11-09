@@ -23,7 +23,7 @@ use crate::{
 cfg_if! {
     if #[cfg(feature = "scaled-ui")] {
         use anchor_spl::token_2022_extensions::spl_pod::optional_keys::OptionalNonZeroPubkey;
-        use spl_token_2022::extension::ExtensionType;
+        use anchor_spl::token_2022::spl_token_2022::{self, extension::ExtensionType};
         use crate::{
             constants::{INDEX_SCALE_U64, ONE_HUNDRED_PERCENT_U64},
             utils::conversion::{sync_index, get_mint_extensions, get_scaled_ui_config, multiplier_to_index},

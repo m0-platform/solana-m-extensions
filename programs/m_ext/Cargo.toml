@@ -28,7 +28,6 @@ wm = ["crank", "migrate"]
 [dependencies]
 anchor-lang.workspace = true
 anchor-spl.workspace = true
-spl-token-2022.workspace = true
 cfg-if.workspace = true
 solana-security-txt.workspace = true
 earn.workspace = true

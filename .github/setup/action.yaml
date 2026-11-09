@@ -8,11 +8,11 @@ inputs:
   solana-version:
     description: "Solana version"
     required: false
-    default: "v2.1.0"
+    default: "v4.2.2"
   anchor-version:
     description: "Anchor CLI version"
     required: false
-    default: "0.31.1"
+    default: "1.2.0"
 runs:
   using: "composite"
   steps:

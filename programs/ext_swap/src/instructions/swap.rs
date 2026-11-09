@@ -170,7 +170,7 @@ impl<'info> Swap<'info> {
 
     #[access_control(ctx.accounts.validate(amount, ctx.remaining_accounts, remaining_accounts_split_idx))]
     pub fn handler(
-        ctx: Context<'_, '_, '_, 'info, Self>,
+        ctx: Context<'info, Self>,
         amount: u64,
         remaining_accounts_split_idx: usize,
     ) -> Result<()> {
@@ -188,7 +188,7 @@ impl<'info> Swap<'info> {
         // Unwrap a specific amount of extension token for M
         m_ext::cpi::unwrap(
             CpiContext::new_with_signer(
-                ctx.accounts.from_ext_program.to_account_info(),
+                ctx.accounts.from_ext_program.key(),
                 Unwrap {
                     token_authority: ctx.accounts.signer.to_account_info(),
                     unwrap_authority: Some(unwrap_authority),
@@ -218,7 +218,7 @@ impl<'info> Swap<'info> {
         // Wrap the specified amount to the extension token
         m_ext::cpi::wrap(
             CpiContext::new_with_signer(
-                ctx.accounts.to_ext_program.to_account_info(),
+                ctx.accounts.to_ext_program.key(),
                 Wrap {
                     token_authority: ctx.accounts.swap_global.to_account_info(),
                     wrap_authority: Some(wrap_authority),
