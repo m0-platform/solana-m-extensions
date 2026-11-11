@@ -13,13 +13,16 @@
 //
 // The vault $M leaves as wM because $M accounts start frozen and the portal
 // does not bridge $M. The wM lands in an account owned by the pinned
-// `RECIPIENT`, who bridges it to close the issuer's V1 position. wM runs this
-// same program, so the wrap is built from this crate's own `Wrap` types. The
-// wM admin must list this program's vault PDA as a wrap authority first.
+// `RECIPIENT`, who bridges it to close the issuer's V1 position. The wrap goes
+// through `ext_swap`, whose `SwapGlobal` is already a wM wrap authority, so the
+// cutover needs no change to wM's wrap list.
 
 use anchor_lang::{
     prelude::*,
-    solana_program::{instruction::Instruction, program::invoke_signed},
+    solana_program::{
+        instruction::{AccountMeta, Instruction},
+        program::invoke_signed,
+    },
     InstructionData,
 };
 use anchor_spl::{
@@ -61,6 +64,9 @@ const RECIPIENT: Pubkey = pubkey!("8dDyonHjmXBUpTy6hkWd4CbKHLeqkimv4SpR1ZqK2G3t"
 
 // wM, the extension the vault is wrapped into.
 const WM_PROGRAM_ID: Pubkey = pubkey!("wMXX1K1nca5W4pZr1piETe78gcAVVrEFi9f4g46uXko");
+
+// ext_swap, the swap facility that wraps $M into a whitelisted extension.
+const EXT_SWAP_PROGRAM_ID: Pubkey = pubkey!("MSwapi3WhNKMUGm9YrxGhypgUEt7wYQH3ZgG32XoWzH");
 
 #[derive(Accounts)]
 pub struct Handoff<'info> {
@@ -144,9 +150,18 @@ pub struct Handoff<'info> {
     #[account(mut)]
     pub wm_vault_m_token_account: UncheckedAccount<'info>,
 
+    /// CHECK: Pinned by address. Its crate depends on this one, so no program
+    /// type exists for it here.
+    #[account(address = EXT_SWAP_PROGRAM_ID @ ExtError::InvalidAccount)]
+    pub ext_swap_program: UncheckedAccount<'info>,
+    /// CHECK: ext_swap's `SwapGlobal`, the wrap authority wM lists. ext_swap's
+    /// wrap checks its seed and that wM is whitelisted.
+    pub swap_global: UncheckedAccount<'info>,
+
     pub m_token_program: Program<'info, Token2022>,
     pub ext_token_program: Interface<'info, TokenInterface>,
     pub wm_token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
 }
 
 impl Handoff<'_> {
@@ -238,42 +253,52 @@ impl Handoff<'_> {
             )?;
             let amount = principal_to_amount_up(vault_principal, m_index)?;
 
-            // The vault PDA owns the $M and is on wM's wrap list, so it signs
-            // as both the token authority and the wrap authority.
+            // ext_swap's `wrap`: the vault PDA signs as the $M owner and
+            // `SwapGlobal` signs as wM's wrap authority. The metas follow
+            // ext_swap's `Wrap` order. Its `wrap_authority` is omitted, which
+            // Anchor encodes as the called program's id.
             let a = &ctx.accounts;
-            let accounts = crate::accounts::Wrap {
-                token_authority: a.m_vault.key(),
-                wrap_authority: Some(a.m_vault.key()),
-                m_mint: a.m_mint.key(),
-                ext_mint: a.wm_mint.key(),
-                global_account: a.wm_global.key(),
-                m_vault: a.wm_m_vault.key(),
-                ext_mint_authority: a.wm_mint_authority.key(),
-                from_m_token_account: a.vault_m_token_account.key(),
-                vault_m_token_account: a.wm_vault_m_token_account.key(),
-                to_ext_token_account: a.recipient_wm_token_account.key(),
-                m_token_program: a.m_token_program.key(),
-                ext_token_program: a.wm_token_program.key(),
-            };
+            let accounts = vec![
+                AccountMeta::new_readonly(a.m_vault.key(), true),
+                AccountMeta::new_readonly(EXT_SWAP_PROGRAM_ID, false),
+                AccountMeta::new_readonly(a.swap_global.key(), false),
+                AccountMeta::new(a.wm_global.key(), false),
+                AccountMeta::new(a.wm_mint.key(), false),
+                AccountMeta::new_readonly(a.m_mint.key(), false),
+                AccountMeta::new(a.vault_m_token_account.key(), false),
+                AccountMeta::new(a.recipient_wm_token_account.key(), false),
+                AccountMeta::new_readonly(a.wm_m_vault.key(), false),
+                AccountMeta::new_readonly(a.wm_mint_authority.key(), false),
+                AccountMeta::new(a.wm_vault_m_token_account.key(), false),
+                AccountMeta::new_readonly(a.wm_token_program.key(), false),
+                AccountMeta::new_readonly(a.m_token_program.key(), false),
+                AccountMeta::new_readonly(a.wm_program.key(), false),
+                AccountMeta::new_readonly(a.system_program.key(), false),
+            ];
             invoke_signed(
                 &Instruction {
-                    program_id: WM_PROGRAM_ID,
-                    accounts: accounts.to_account_metas(None),
+                    program_id: EXT_SWAP_PROGRAM_ID,
+                    accounts,
+                    // ext_swap's `wrap(amount)` shares this crate's name and
+                    // arguments, so the encoded data is identical.
                     data: crate::instruction::Wrap { amount }.data(),
                 },
                 &[
                     a.m_vault.to_account_info(),
-                    a.m_mint.to_account_info(),
-                    a.wm_mint.to_account_info(),
+                    a.ext_swap_program.to_account_info(),
+                    a.swap_global.to_account_info(),
                     a.wm_global.to_account_info(),
+                    a.wm_mint.to_account_info(),
+                    a.m_mint.to_account_info(),
+                    a.vault_m_token_account.to_account_info(),
+                    a.recipient_wm_token_account.to_account_info(),
                     a.wm_m_vault.to_account_info(),
                     a.wm_mint_authority.to_account_info(),
-                    a.vault_m_token_account.to_account_info(),
                     a.wm_vault_m_token_account.to_account_info(),
-                    a.recipient_wm_token_account.to_account_info(),
-                    a.m_token_program.to_account_info(),
                     a.wm_token_program.to_account_info(),
+                    a.m_token_program.to_account_info(),
                     a.wm_program.to_account_info(),
+                    a.system_program.to_account_info(),
                 ],
                 vault_seeds,
             )?;

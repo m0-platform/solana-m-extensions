@@ -7,8 +7,9 @@
 //
 // The gateway program itself is not loaded. handoff validates the target
 // Stablecoin account by derivation, owner, and bytes, so the tests plant that
-// account directly with `setAccount`. A crank build at the wM id (ext_wm.so,
-// see the Makefile) is loaded so the vault wrap runs for real.
+// account directly with `setAccount`. Mainnet dumps of wM (ext_wm.so) and
+// ext_swap (ext_swap.so) are loaded so the vault wrap runs for real, through
+// ext_swap, with `SwapGlobal` on wM's wrap list as it is on mainnet.
 //
 // [X] given the admin, a funded vault, and an AdoptionPending target
 //   [X] it moves the mint authority to the target
@@ -23,7 +24,9 @@
 // [X] given a target with a wrong discriminator, version, mint or length
 //                                                       it reverts with InvalidAccount
 // [X] given a wrap program that is not wM               it reverts with InvalidAccount
-// [X] given a vault PDA off wM's wrap list              it reverts with NotAuthorized
+// [X] given a swap program that is not ext_swap         it reverts with InvalidAccount
+// [X] given SwapGlobal off wM's wrap list               it reverts with NotAuthorized
+// [X] given wM not whitelisted on ext_swap              it reverts with InvalidExtension
 // [X] given a recipient account for another mint        it reverts with ConstraintTokenMint
 // [X] given a recipient not owned by the pinned wallet  it reverts with ConstraintTokenOwner
 // [X] given a second call after a successful handoff    it reverts
@@ -42,8 +45,10 @@ import {
 
 import { ExtensionTest, Variant } from "./ext_test_harness";
 import { MExt as CrankExt } from "../../target/types/crank";
+import { ExtSwap } from "../../target/types/ext_swap";
 
 const CRANK_IDL = require("../../target/idl/crank.json");
+const EXT_SWAP_IDL = require("../../target/idl/ext_swap.json");
 
 type Shape = {
   name: string;
@@ -86,12 +91,18 @@ const wmProgramId = new PublicKey(
   "wMXX1K1nca5W4pZr1piETe78gcAVVrEFi9f4g46uXko"
 );
 
+// ext_swap, `EXT_SWAP_PROGRAM_ID` in programs/m_ext/src/instructions/handoff.rs.
+const extSwapProgramId = new PublicKey(
+  "MSwapi3WhNKMUGm9YrxGhypgUEt7wYQH3ZgG32XoWzH"
+);
+
 const pda = (seed: string, program: PublicKey): PublicKey =>
   PublicKey.findProgramAddressSync([Buffer.from(seed)], program)[0];
 
 describe.each(shapes)("handoff unit tests ($name)", (shape) => {
   let $: ExtensionTest<any>;
   let wm: Program<CrankExt>;
+  let swap: Program<ExtSwap>;
   let wmMint: Keypair;
   let vaultMTokenAccount: PublicKey;
   let issuerWmTokenAccount: PublicKey;
@@ -137,6 +148,7 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     opts?: {
       signer?: Keypair;
       wmProgram?: PublicKey;
+      extSwapProgram?: PublicKey;
       recipientWmTokenAccount?: PublicKey;
     }
   ) => {
@@ -161,34 +173,55 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
         wmMVault: wmVault,
         wmMintAuthority: pda("mint_authority", wmProgramId),
         wmVaultMTokenAccount: mAta(wmVault),
+        extSwapProgram: opts?.extSwapProgram ?? extSwapProgramId,
+        swapGlobal: pda("global", extSwapProgramId),
         mTokenProgram: TOKEN_2022_PROGRAM_ID,
         extTokenProgram: TOKEN_2022_PROGRAM_ID,
         wmTokenProgram: TOKEN_2022_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
       })
       .signers([signer])
       .rpc();
   };
 
-  // Load wM and wire it the way the cutover needs: the wM admin lists this
-  // extension's vault PDA as a wrap authority.
+  // Load wM and ext_swap and wire them as mainnet has them: ext_swap
+  // whitelists wM, and wM lists `SwapGlobal` as a wrap authority. Nothing
+  // lists this extension's vault PDA.
   const setUpWm = async () => {
     $.svm.addProgramFromFile(wmProgramId, "tests/programs/ext_wm.so");
     wm = new Program<CrankExt>(
       { ...CRANK_IDL, address: wmProgramId },
       $.provider
     );
+    $.svm.addProgramFromFile(extSwapProgramId, "tests/programs/ext_swap.so");
+    swap = new Program<ExtSwap>(EXT_SWAP_IDL, $.provider);
 
     wmMint = new Keypair();
     const wmMintAuthority = pda("mint_authority", wmProgramId);
     await $.createMint(wmMint, wmMintAuthority, wmMintAuthority, true);
     await $.addMEarner(pda("m_vault", wmProgramId));
     await wm.methods
-      .initialize([$.getMVault()], $.admin.publicKey)
+      .initialize([pda("global", extSwapProgramId)], $.admin.publicKey)
       .accounts({
         admin: $.admin.publicKey,
         mMint: $.mMint.publicKey,
         extMint: wmMint.publicKey,
         extTokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .signers([$.admin])
+      .rpc();
+
+    await swap.methods
+      .initializeGlobal()
+      .accounts({ admin: $.admin.publicKey })
+      .signers([$.admin])
+      .rpc();
+    await swap.methods
+      .whitelistExtension()
+      .accountsPartial({
+        admin: $.admin.publicKey,
+        extProgram: wmProgramId,
+        extMint: wmMint.publicKey,
       })
       .signers([$.admin])
       .rpc();
@@ -328,14 +361,32 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     );
   });
 
-  test("vault PDA not on wM's wrap list - reverts", async () => {
+  test("swap program is not ext_swap - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    await $.expectAnchorError(
+      handoff(stablecoin, { extSwapProgram: $.ext.programId }),
+      "InvalidAccount"
+    );
+  });
+
+  test("SwapGlobal not on wM's wrap list - reverts", async () => {
     const stablecoin = plantStablecoin();
     await wm.methods
-      .removeWrapAuthority($.getMVault())
+      .removeWrapAuthority(pda("global", extSwapProgramId))
       .accounts({ admin: $.admin.publicKey })
       .signers([$.admin])
       .rpc();
     await $.expectAnchorError(handoff(stablecoin), "NotAuthorized");
+  });
+
+  test("wM not whitelisted on ext_swap - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    await swap.methods
+      .removeWhitelistedExtension(wmProgramId)
+      .accountsPartial({ admin: $.admin.publicKey })
+      .signers([$.admin])
+      .rpc();
+    await $.expectAnchorError(handoff(stablecoin), "InvalidExtension");
   });
 
   test("recipient account holds another mint - reverts", async () => {
