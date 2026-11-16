@@ -1,0 +1,4 @@
+# Reviewed false alarms. Each line is file:rule:start-line.
+# A new secret on a different line still fails the scan.
+.hive/memories.jsonl:evm-32-byte-hex:14
+.hive/memories.jsonl:evm-32-byte-hex:15
