@@ -29,6 +29,7 @@
 // [X] given wM not whitelisted on ext_swap              it reverts with InvalidExtension
 // [X] given a recipient account for another mint        it reverts with ConstraintTokenMint
 // [X] given a recipient not owned by the pinned wallet  it reverts with ConstraintTokenOwner
+// [X] given a global created for another yield variant  it reverts with InvalidAccount
 // [X] given a freeze authority at the program's own PDA it reverts with FreezeAuthorityUnreachable
 // [X] given a second call after a successful handoff    it reverts
 // [X] given a mint with Scaled UI Amount (usdk, usdky)
@@ -411,6 +412,21 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
       handoff(stablecoin, { recipientWmTokenAccount: elsewhere }),
       "ConstraintTokenOwner"
     );
+  });
+
+  test("global created for another yield variant - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    const global = $.getExtGlobalAccount();
+    const account = $.svm.getAccount(global)!;
+    const data = Buffer.from(account.data);
+    // discriminator, admin, pending_admin (Option), three pubkeys, three bumps
+    const pendingAdminLen = data[40] === 0 ? 1 : 33;
+    const variantOffset = 8 + 32 + pendingAdminLen + 32 * 3 + 3;
+    // NoYield is 0 and ScaledUi is 1: flip to the variant this build is not.
+    data[variantOffset] = data[variantOffset] === 0 ? 1 : 0;
+    $.svm.setAccount(global, { ...account, data });
+
+    await $.expectAnchorError(handoff(stablecoin), "InvalidAccount");
   });
 
   test("freeze authority held by the program's own PDA - reverts", async () => {

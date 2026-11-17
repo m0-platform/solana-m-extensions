@@ -37,7 +37,7 @@ use spl_token_2022::extension::ExtensionType;
 
 use crate::{
     errors::ExtError,
-    state::{ExtGlobalV2, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED, M_VAULT_SEED},
+    state::{ExtGlobalV2, YieldVariant, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED, M_VAULT_SEED},
     utils::conversion::{
         get_mint_extensions, multiplier_to_index, principal_to_amount_up, sync_index,
     },
@@ -167,6 +167,16 @@ pub struct Handoff<'info> {
 
 impl Handoff<'_> {
     fn validate(&self) -> Result<()> {
+        // The variant is the first byte of every layout, so a wrong build reads it right.
+        let built_variant = if cfg!(feature = "scaled-ui") {
+            YieldVariant::ScaledUi
+        } else {
+            YieldVariant::NoYield
+        };
+        if self.global_account.yield_config.yield_variant.clone() as u8 != built_variant as u8 {
+            return err!(ExtError::InvalidAccount);
+        }
+
         // No instruction can move a freeze authority off this PDA to the gateway.
         if self.ext_mint.freeze_authority == COption::Some(self.ext_mint_authority.key()) {
             return err!(ExtError::FreezeAuthorityUnreachable);
