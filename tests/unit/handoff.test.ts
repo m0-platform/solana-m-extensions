@@ -29,6 +29,7 @@
 // [X] given wM not whitelisted on ext_swap              it reverts with InvalidExtension
 // [X] given a recipient account for another mint        it reverts with ConstraintTokenMint
 // [X] given a recipient not owned by the pinned wallet  it reverts with ConstraintTokenOwner
+// [X] given a freeze authority at the program's own PDA it reverts with FreezeAuthorityUnreachable
 // [X] given a second call after a successful handoff    it reverts
 // [X] given a mint with Scaled UI Amount (usdk, usdky)
 //   [X] it moves the Scaled UI authority to the target
@@ -36,9 +37,11 @@
 // [X] given a plain mint (xo)                           it touches no Scaled UI authority
 
 import { BN, Program } from "@coral-xyz/anchor";
-import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import {
+  AuthorityType,
   TOKEN_2022_PROGRAM_ID,
+  createSetAuthorityInstruction,
   getAssociatedTokenAddressSync,
   getMint,
 } from "@solana/spl-token";
@@ -408,6 +411,21 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
       handoff(stablecoin, { recipientWmTokenAccount: elsewhere }),
       "ConstraintTokenOwner"
     );
+  });
+
+  test("freeze authority held by the program's own PDA - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    const parkIx = createSetAuthorityInstruction(
+      $.extMint.publicKey,
+      $.admin.publicKey,
+      AuthorityType.FreezeAccount,
+      $.getExtMintAuthority(),
+      [],
+      TOKEN_2022_PROGRAM_ID
+    );
+    await $.provider.sendAndConfirm!(new Transaction().add(parkIx), [$.admin]);
+
+    await $.expectAnchorError(handoff(stablecoin), "FreezeAuthorityUnreachable");
   });
 
   test("second call after a successful handoff - reverts", async () => {

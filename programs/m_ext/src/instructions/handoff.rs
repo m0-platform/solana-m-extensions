@@ -22,6 +22,7 @@ use anchor_lang::{
     solana_program::{
         instruction::{AccountMeta, Instruction},
         program::invoke_signed,
+        program_option::COption,
     },
     InstructionData,
 };
@@ -166,6 +167,11 @@ pub struct Handoff<'info> {
 
 impl Handoff<'_> {
     fn validate(&self) -> Result<()> {
+        // No instruction can move a freeze authority off this PDA to the gateway.
+        if self.ext_mint.freeze_authority == COption::Some(self.ext_mint_authority.key()) {
+            return err!(ExtError::FreezeAuthorityUnreachable);
+        }
+
         // The account must be a live `Stablecoin` in `AdoptionPending` bound to
         // this mint, so the authority never moves to an unverified target.
         let data = self.stablecoin.try_borrow_data()?;
