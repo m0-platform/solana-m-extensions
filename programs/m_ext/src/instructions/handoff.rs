@@ -53,14 +53,14 @@ const MINT_ORIGIN_ADOPTION_PENDING: u8 = 1;
 const MINT_OFFSET: usize = 10;
 
 // The issuer's gateway program id. Each issuer deploys its own gateway, so
-// each cutover sets this line and ships its own binary. The admin never
-// supplies it. This value is the test gateway.
-const GATEWAY_PROGRAM_ID: Pubkey = pubkey!("EDKMBb8e1DyCZtUrczZeJgxWgMU2nLBCuK31XzPnXWu3");
+// each cutover build sets it and ships its own binary. The admin never
+// supplies it. No default exists: a build without it fails to compile.
+const GATEWAY_PROGRAM_ID: Pubkey = Pubkey::from_str_const(env!("HANDOFF_GATEWAY_PROGRAM_ID"));
 
 // The issuer wallet that must own the account receiving the wrapped vault. Set
-// with the gateway id for each cutover, so a stolen admin key cannot redirect
-// the vault. This value is the test recipient.
-const RECIPIENT: Pubkey = pubkey!("8dDyonHjmXBUpTy6hkWd4CbKHLeqkimv4SpR1ZqK2G3t");
+// with the gateway id for each cutover build, so a stolen admin key cannot
+// redirect the vault. No default exists: a build without it fails to compile.
+const RECIPIENT: Pubkey = Pubkey::from_str_const(env!("HANDOFF_RECIPIENT"));
 
 // wM, the extension the vault is wrapped into.
 const WM_PROGRAM_ID: Pubkey = pubkey!("wMXX1K1nca5W4pZr1piETe78gcAVVrEFi9f4g46uXko");

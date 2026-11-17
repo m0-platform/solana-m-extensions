@@ -76,14 +76,14 @@ const MINT_ORIGIN_OFFSET = 5;
 const MINT_ORIGIN_ADOPTION_PENDING = 1;
 const MINT_OFFSET = 10;
 
-// The gateway id the test binary pins, `GATEWAY_PROGRAM_ID` in
-// programs/m_ext/src/instructions/handoff.rs.
+// The gateway id the test binary pins, `HANDOFF_GATEWAY_PROGRAM_ID` in the
+// Makefile's `HANDOFF_TEST_ENV`.
 const gatewayProgram = new PublicKey(
   "EDKMBb8e1DyCZtUrczZeJgxWgMU2nLBCuK31XzPnXWu3"
 );
 
-// The issuer wallet the test binary pins, `RECIPIENT` in
-// programs/m_ext/src/instructions/handoff.rs.
+// The issuer wallet the test binary pins, `HANDOFF_RECIPIENT` in the
+// Makefile's `HANDOFF_TEST_ENV`.
 const recipient = new PublicKey("8dDyonHjmXBUpTy6hkWd4CbKHLeqkimv4SpR1ZqK2G3t");
 
 // wM, `WM_PROGRAM_ID` in programs/m_ext/src/instructions/handoff.rs.
