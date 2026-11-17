@@ -6,10 +6,10 @@
 // end state after the remaining authorities move off-chain.
 //
 // In order: verify the derived target, sync the ext index so holders keep the
-// yield the vault earned, move the mint authority (and the Scaled UI Amount
-// authority when the mint has one), wrap the whole $M vault into wM and close
-// the vault, clear `wrap_authorities`. The empty list and the closed vault stop
-// any later wrap or unwrap.
+// yield the vault earned, check the vault covers them, move the mint authority
+// (and the Scaled UI Amount authority when the mint has one), wrap the whole $M
+// vault into wM and close the vault, clear `wrap_authorities`. The empty list
+// and the closed vault stop any later wrap or unwrap.
 //
 // The vault $M leaves as wM because $M accounts start frozen and the portal
 // does not bridge $M. The wM lands in an account owned by the pinned
@@ -39,7 +39,8 @@ use crate::{
     errors::ExtError,
     state::{ExtGlobalV2, YieldVariant, EXT_GLOBAL_SEED, MINT_AUTHORITY_SEED, M_VAULT_SEED},
     utils::conversion::{
-        get_mint_extensions, multiplier_to_index, principal_to_amount_up, sync_index,
+        get_mint_extensions, multiplier_to_index, principal_to_amount_down,
+        principal_to_amount_up, sync_index,
     },
 };
 
@@ -208,7 +209,7 @@ impl Handoff<'_> {
         // to the recipient. A scaled-ui build updates the multiplier, which only
         // this program's PDA can sign, so it runs before that authority moves.
         // Other builds return at once.
-        sync_index(
+        let ext_index = sync_index(
             &mut ctx.accounts.ext_mint,
             &mut ctx.accounts.global_account,
             &ctx.accounts.m_mint,
@@ -217,6 +218,19 @@ impl Handoff<'_> {
             mint_authority_seeds,
             &ctx.accounts.ext_token_program,
         )?;
+
+        // The vault must cover every holder before the gateway inherits the mint.
+        let m_index = multiplier_to_index(
+            earn::utils::conversion::get_scaled_ui_config(&ctx.accounts.m_mint)?
+                .new_multiplier
+                .into(),
+        )?;
+        let vault_principal = ctx.accounts.vault_m_token_account.amount;
+        let vault_m = principal_to_amount_down(vault_principal, m_index)?;
+        let required_m = principal_to_amount_up(ctx.accounts.ext_mint.supply, ext_index)?;
+        if vault_m < required_m {
+            return err!(ExtError::InsufficientCollateral);
+        }
 
         // Move the mint authority to the verified Stablecoin PDA.
         set_authority(
@@ -260,13 +274,7 @@ impl Handoff<'_> {
         // up returns exactly the vault principal and the close below sees zero.
         let vault_seeds: &[&[&[u8]]] =
             &[&[M_VAULT_SEED, &[ctx.accounts.global_account.m_vault_bump]]];
-        let vault_principal = ctx.accounts.vault_m_token_account.amount;
         if vault_principal > 0 {
-            let m_index = multiplier_to_index(
-                earn::utils::conversion::get_scaled_ui_config(&ctx.accounts.m_mint)?
-                    .new_multiplier
-                    .into(),
-            )?;
             let amount = principal_to_amount_up(vault_principal, m_index)?;
 
             // ext_swap's `wrap`: the vault PDA signs as the $M owner and

@@ -29,6 +29,7 @@
 // [X] given wM not whitelisted on ext_swap              it reverts with InvalidExtension
 // [X] given a recipient account for another mint        it reverts with ConstraintTokenMint
 // [X] given a recipient not owned by the pinned wallet  it reverts with ConstraintTokenOwner
+// [X] given an ext supply the vault cannot cover        it reverts with InsufficientCollateral
 // [X] given a global created for another yield variant  it reverts with InvalidAccount
 // [X] given a freeze authority at the program's own PDA it reverts with FreezeAuthorityUnreachable
 // [X] given a second call after a successful handoff    it reverts
@@ -251,6 +252,8 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     // ext stays unsynced, as a live one usually is, so handoff must sync it.
     await $.wrap($.admin, wrappedAmount);
     await $.propagateIndex(new BN(1_200_000_000_000));
+    // Fee-0 scaled-ui wrap rounding leaves the vault dust short, so the cutover runbook tops it up.
+    if (shape.variant === Variant.ScaledUi) await $.mintM($.getMVault(), new BN(10));
   });
 
   const testScaledUiMint = shape.scaledUiMint ? test : test.skip;
@@ -348,6 +351,10 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
     const data = Buffer.from(vault.data);
     data.writeBigUInt64LE(0n, 64); // token account amount
     $.svm.setAccount(vaultMTokenAccount, { ...vault, data });
+    const mint = $.svm.getAccount($.extMint.publicKey)!;
+    const mintData = Buffer.from(mint.data);
+    mintData.writeBigUInt64LE(0n, 36); // no holders, or the vault is insolvent
+    $.svm.setAccount($.extMint.publicKey, { ...mint, data: mintData });
 
     await handoff(stablecoin);
 
@@ -412,6 +419,18 @@ describe.each(shapes)("handoff unit tests ($name)", (shape) => {
       handoff(stablecoin, { recipientWmTokenAccount: elsewhere }),
       "ConstraintTokenOwner"
     );
+  });
+
+  test("ext supply exceeds the vault after the sync - reverts", async () => {
+    const stablecoin = plantStablecoin();
+    // Raise the raw supply far above the vault, so holders are owed more $M
+    // than the vault can wrap.
+    const mintAccount = $.svm.getAccount($.extMint.publicKey)!;
+    const data = Buffer.from(mintAccount.data);
+    data.writeBigUInt64LE(10n ** 15n, 36);
+    $.svm.setAccount($.extMint.publicKey, { ...mintAccount, data });
+
+    await $.expectAnchorError(handoff(stablecoin), "InsufficientCollateral");
   });
 
   test("global created for another yield variant - reverts", async () => {
