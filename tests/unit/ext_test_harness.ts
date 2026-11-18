@@ -1115,6 +1115,9 @@ export class ExtensionTest<
   public earnAuthority: Keypair;
   public wrapAuthority: Keypair;
   public nonWrapAuthority: Keypair;
+  // A no-yield ext mint normally has no Scaled UI Amount extension. Set before
+  // `init` to give it one, as a V1 no-yield program with a scaled-ui mint has.
+  public scaledUiMint = false;
 
   constructor(variant: V, extTokenProgram: PublicKey, addresses: PublicKey[]) {
     super(addresses);
@@ -1161,6 +1164,15 @@ export class ExtensionTest<
     // Create the Ext token mint
     switch (this.variant) {
       case Variant.NoYield:
+        if (this.scaledUiMint) {
+          await this.createScaledUiMint(
+            this.extMint,
+            this.getExtMintAuthority(),
+            this.admin.publicKey,
+            6
+          );
+          break;
+        }
         await this.createMint(
           this.extMint,
           this.getExtMintAuthority(),

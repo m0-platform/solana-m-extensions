@@ -23,6 +23,8 @@ crank = []
 
 # Migration feature flag
 migrate = []
+# V2 gateway handoff
+handoff = []
 wm = ["crank", "migrate"]
 
 [dependencies]

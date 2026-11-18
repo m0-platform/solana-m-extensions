@@ -1,10 +1,14 @@
+# Test gateway and recipient for the handoff builds below. These binaries are
+# for tests only. A cutover build sets both to the issuer's values.
+HANDOFF_TEST_ENV = HANDOFF_GATEWAY_PROGRAM_ID=EDKMBb8e1DyCZtUrczZeJgxWgMU2nLBCuK31XzPnXWu3 HANDOFF_RECIPIENT=8dDyonHjmXBUpTy6hkWd4CbKHLeqkimv4SpR1ZqK2G3t
+
 build-programs:
 	anchor build -p ext_swap -- --features migrate --no-default-features
-	anchor build -p m_ext -- --features scaled-ui --no-default-features
+	$(HANDOFF_TEST_ENV) anchor build -p m_ext -- --features scaled-ui,handoff --no-default-features
 	@mv target/deploy/m_ext.so target/deploy/scaled_ui.so
 	@mv target/idl/m_ext.json target/idl/scaled_ui.json
 	@mv target/types/m_ext.ts target/types/scaled_ui.ts
-	anchor build -p m_ext -- --features no-yield --no-default-features
+	$(HANDOFF_TEST_ENV) anchor build -p m_ext -- --features no-yield,handoff --no-default-features
 	@mv target/deploy/m_ext.so target/deploy/no_yield.so
 	@mv target/idl/m_ext.json target/idl/no_yield.json
 	@mv target/types/m_ext.ts target/types/no_yield.ts
