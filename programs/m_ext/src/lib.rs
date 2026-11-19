@@ -21,7 +21,7 @@ solana_security_txt::security_txt! {
     auditors: "Asymmetric Research,Adevar Labs,OtterSec,Halborn"
 }
 
-declare_id!("3C865D264L4NkAm78zfnDzQJJvXuU3fMjRUvRxyPi5da");
+declare_id!("mextzNVPUbLbvyBwqBqnC5J1SSwjDLjjR4yppf6EBzc");
 
 // Validate feature combinations
 const _: () = {
