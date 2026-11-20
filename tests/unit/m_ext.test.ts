@@ -2549,7 +2549,10 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 .accounts({
                   tokenAuthority: $.wrapAuthority.publicKey,
                   wrapAuthority: $.ext.programId,
-                  fromMTokenAccount: toExtTokenAccount,
+                  // a distinct account, since Anchor 1.x refuses the same mutable account twice
+                  fromMTokenAccount: (
+                    await $.createTokenAccount($.extMint.publicKey, $.wrapAuthority.publicKey, $.useToken2022ForExt)
+                  ).tokenAccount,
                   toExtTokenAccount,
                   extTokenProgram: $.extTokenProgram,
                 })
@@ -2570,7 +2573,10 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 .accounts({
                   tokenAuthority: $.wrapAuthority.publicKey,
                   wrapAuthority: $.ext.programId,
-                  toExtTokenAccount: fromMTokenAccount,
+                  // a distinct account, since Anchor 1.x refuses the same mutable account twice
+                  toExtTokenAccount: (
+                    await $.createTokenAccount($.mMint.publicKey, $.wrapAuthority.publicKey)
+                  ).tokenAccount,
                   fromMTokenAccount,
                   extTokenProgram: $.extTokenProgram,
                 })
@@ -4172,7 +4178,10 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 .accounts({
                   tokenAuthority: $.wrapAuthority.publicKey,
                   unwrapAuthority: $.ext.programId,
-                  toMTokenAccount: fromExtTokenAccount,
+                  // a distinct account, since Anchor 1.x refuses the same mutable account twice
+                  toMTokenAccount: (
+                    await $.createTokenAccount($.extMint.publicKey, $.wrapAuthority.publicKey, $.useToken2022ForExt)
+                  ).tokenAccount,
                   fromExtTokenAccount,
                   extTokenProgram: $.extTokenProgram,
                 })
@@ -4193,7 +4202,10 @@ for (const [variant, tokenProgramId] of VARIANTS) {
                 .accounts({
                   tokenAuthority: $.wrapAuthority.publicKey,
                   unwrapAuthority: $.ext.programId,
-                  fromExtTokenAccount: toMTokenAccount,
+                  // a distinct account, since Anchor 1.x refuses the same mutable account twice
+                  fromExtTokenAccount: (
+                    await $.createTokenAccount($.mMint.publicKey, $.wrapAuthority.publicKey)
+                  ).tokenAccount,
                   toMTokenAccount,
                   extTokenProgram: $.extTokenProgram,
                 })

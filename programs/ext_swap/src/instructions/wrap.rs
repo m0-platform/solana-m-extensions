@@ -115,7 +115,7 @@ impl<'info> Wrap<'info> {
     }
 
     #[access_control(ctx.accounts.validate(amount))]
-    pub fn handler(ctx: Context<'_, '_, '_, 'info, Self>, amount: u64) -> Result<()> {
+    pub fn handler(ctx: Context<'info, Self>, amount: u64) -> Result<()> {
         // Set swap program as authority if none provided
         let wrap_authority = match &ctx.accounts.wrap_authority {
             Some(auth) => auth.to_account_info(),
@@ -124,7 +124,7 @@ impl<'info> Wrap<'info> {
 
         m_ext::cpi::wrap(
             CpiContext::new_with_signer(
-                ctx.accounts.to_ext_program.to_account_info(),
+                ctx.accounts.to_ext_program.key(),
                 ExtWrap {
                     token_authority: ctx.accounts.signer.to_account_info(),
                     wrap_authority: Some(wrap_authority),

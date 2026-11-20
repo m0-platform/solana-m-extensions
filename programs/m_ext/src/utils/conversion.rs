@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token_2022::spl_token_2022;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use cfg_if::cfg_if;
 use spl_token_2022::extension::{BaseStateWithExtensions, StateWithExtensions};

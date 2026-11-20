@@ -14,9 +14,8 @@ incremental = false
 codegen-units = 1
 
 [workspace.dependencies]
-anchor-lang = "0.31.1"
-anchor-spl = "0.31.1"
-spl-token-2022 = { version = "7.0.0", features = ["no-entrypoint"] }
+anchor-lang = "1.2.0"
+anchor-spl = "1.2.0"
 solana-security-txt = "1.1.1"
 cfg-if = "1.0"
-earn = { git = "https://github.com/m0-foundation/solana-m", rev = "972e896", features = ["no-entrypoint"] }
+earn = { git = "https://github.com/m0-platform/solana-m", rev = "ab45d08", features = ["no-entrypoint"] }

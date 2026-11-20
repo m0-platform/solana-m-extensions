@@ -215,7 +215,7 @@ fn handle_fee(
     };
 
     let cpi_context = CpiContext::new_with_signer(
-        ctx.accounts.ext_token_program.to_account_info(),
+        ctx.accounts.ext_token_program.key(),
         mint_options,
         mint_authority_seeds,
     );

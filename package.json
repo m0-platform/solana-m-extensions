@@ -16,11 +16,11 @@
     "@solana-developers/helpers": "2.8.1",
     "@solana/buffer-layout": "4.0.1",
     "@solana/buffer-layout-utils": "0.2.0",
+    "@solana/kit": "^8.0.0",
     "@solana/spl-token": "0.4.13",
     "@solana/web3.js": "1.98.2",
-    "anchor-litesvm": "0.1.2",
     "bn.js": "5.2.2",
-    "litesvm": "0.2.0",
+    "litesvm": "1.6.1",
     "sha3": "^2.1.4"
   },
   "devDependencies": {
@@ -32,7 +32,6 @@
     "@types/bn.js": "catalog:",
     "@types/jest": "29.0.3",
     "@types/node": "22.15.32",
-    "anchor-litesvm": "~0.1.1",
     "bn.js": "catalog:",
     "fastestsmallesttextencoderdecoder": "catalog:",
     "jest": "29.0.3",
