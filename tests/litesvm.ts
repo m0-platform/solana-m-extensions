@@ -92,6 +92,11 @@ export class LiteSVM {
     };
   }
 
+  getBalance(pk: PublicKey): bigint | null {
+    const account = this.inner.getAccount(toAddress(pk));
+    return account.exists ? BigInt(account.lamports) : null;
+  }
+
   setAccount(pk: PublicKey, account: AccountInfo<Uint8Array>) {
     this.inner.setAccount({
       address: toAddress(pk),

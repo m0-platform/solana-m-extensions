@@ -18,5 +18,4 @@ anchor-lang = "1.2.0"
 anchor-spl = "1.2.0"
 solana-security-txt = "1.1.1"
 cfg-if = "1.0"
-# TEMP: local Anchor 1.2 earn (solana-m e562e04, unpushed). Switch to a pushed rev before any PR.
-earn = { path = "../solana-m/programs/earn", features = ["no-entrypoint"] }
+earn = { git = "https://github.com/m0-platform/solana-m", rev = "ab45d08", features = ["no-entrypoint"] }
